@@ -1,0 +1,303 @@
+\documentclass[a0paper,landscape,margin=15mm,innermargin=12mm,colspace=10mm]{tikzposter}
+\usepackage{lmodern}
+\usepackage{amsmath,amssymb,mathtools}
+% [demo] is used here so it compiles without the actual image file. 
+% Remove [demo] when you use your real 'fig4.png'.
+\usepackage[demo]{graphicx} 
+\usepackage{caption}
+\usepackage{multicol}
+\usepackage{tikz}
+\usetikzlibrary{arrows.meta, shapes, positioning}
+\everymath{\displaystyle}
+
+
+% Choose theme
+\usetheme{Board}
+
+% --- FIXED TITLE BLOCK ---
+\makeatletter % <--- REQUIRED to use \@title, \@author, etc.
+\settitle{\centering
+  \color{titlefgcolor}
+  % 1. LEFT PAPER (20% width)
+  \begin{minipage}[c]{0.22\linewidth} % <--- This was previously commented out!
+    \centering
+    \normalsize\itshape
+    A Connection Between Score Matching and Denoising Autoencoders\\[0.2em]
+    \small\upshape P. Vincent (2011)
+  \end{minipage}
+  \hfill
+  % 2. CENTER TITLE (50% width)
+  \begin{minipage}[c]{0.52\linewidth}
+    \centering
+    \bfseries\huge\@title\par
+    \vspace{0.4em}
+    \large\@author\par
+    \vspace{0.2em}
+    \normalsize\@institute
+  \end{minipage}%
+  \hfill
+  % 3. RIGHT PAPER (20% width)
+  \begin{minipage}[c]{0.22\linewidth}
+    \centering
+    \normalsize\itshape
+    Generative Modeling by Estimating Gradients of the Data Distribution\\[0.2em]
+    \small\upshape Y. Song \& S. Ermon (2019)
+  \end{minipage}
+}
+\makeatother % <--- Close the command access
+% ----------------------------
+
+\title{\textbf{From Denoising to Scores}\\Denoising Autoencoders to Noise-Conditional Score Networks}
+\author{Ilan Aliouchouche, Cl\'ement Marie, Karim Rochd}
+\institute{ENS Paris-Saclay \textbullet\ Master MVA \textbullet\ 2025}
+
+\begin{document}
+
+\maketitle[titletoblockverticalspace=10mm] 
+
+\begin{columns}
+% ==================== COLUMN 1 ====================
+\column{0.32}
+\block{\Large\bfseries Context \& Goal}{
+  Generative modeling aims to sample from complex data  
+  \textbf{without explicit likelihoods or normalizing constants}.  
+  Classical maximum likelihood is often difficult because  
+  \textit{partition functions are intractable}.  
+
+  \vspace{0.6em}
+  Score-based methods avoid this by learning  
+  \textbf{the gradient of the log-density}:  
+  the direction in which likelihood increases.  
+
+  \vspace{0.6em}
+  Vincent (2011) showed that denoising autoencoders  
+  \textbf{implicitly learn the score of a smoothed density}.  
+
+  \vspace{0.6em}
+  Song \& Ermon (2019) extend this idea across  
+  \textbf{multiple noise levels}, yielding  
+  noise-conditional score networks that enable stable,  
+  diffusion-like generative sampling.
+}
+
+\block{\Large\bfseries Denoising Autoencoders (DAE)}{
+
+{
+\centering
+\begin{tikzpicture}[thick,scale=1.4, every node/.style={transform shape},
+  arrowstyle/.style={-{Latex[length=5mm,width=4mm]}}
+]
+
+  \node[circle, draw, minimum size=1.8cm] (x)  at (-1,0) {$x$};
+  \node[circle, draw, minimum size=1.8cm] (xt) at (4,1.2) {$\tilde{x}$};
+  \node[circle, draw, minimum size=1.8cm] (h)  at (9,0) {$h$};
+  \node[circle, draw, minimum size=1.8cm] (L)  at (4,-1.2) {$\mathcal{L}$};
+
+  % Flèches avec pointes visibles
+  \draw[arrowstyle, ultra thick] (x) -- node[midway, above, xshift=-16pt] {\normalsize\textbf{$q(\tilde{x}\mid x)$}} (xt);
+  \draw[arrowstyle, ultra thick] (xt) -- node[midway, above, xshift=18pt] {\normalsize\textbf{$f_{\theta}$}} (h);
+  \draw[arrowstyle, ultra thick] (h) -- node[midway, right, xshift=-6pt, yshift=-12pt] {\normalsize\textbf{$g_{\phi}$}} (L);
+  \draw[arrowstyle, ultra thick] (x) -- (L);
+
+\end{tikzpicture}
+\par
+}
+
+  \vspace{1em}
+
+  A clean sample $x$ is corrupted into $\tilde{x}$ through  
+  $q(\tilde{x}\mid x)$ (e.g. Gaussian noise).  
+  The encoder $f_\theta$ processes $\tilde{x}$, the decoder $g_\phi$
+  reconstructs $\hat{x}$, and the model learns to denoise:
+    \[
+      \mathcal L(\theta,\phi)
+        = \mathbb{E}_{x,\tilde{x}}
+          \bigl[\|g_\phi(f_\theta(\tilde{x})) - x\|^2\bigr].
+    \]
+}
+%\block{\Large\bfseries From DAE to Score Matching}{
+%  \centering
+%  
+%  % --- Section 1 ---
+%  \textbf{\large 1. Why Scores? (Bypassing $Z$)} \\
+%  Likelihood $p(x) = \frac{\tilde{p}(x)}{Z}$ is intractable because $Z$ is %unknown. \\
+%  Taking the gradient makes $Z$ vanish:
+%  \[
+%     \nabla_x \log p(x) = \nabla_x \log \tilde{p}(x) - \underbrace{\nabla_x \log %Z}_{0}
+%  \]
+%
+%
+%  \vspace{0.8em}
+%
+%  % --- Section 2 ---
+%  \textbf{\large 2. The Equivalence} \\
+%  Vincent (2011) proved a surprising duality:
+%  \[
+%     \text{Minimizing Denoising Error} \iff \text{Score Matching}
+%  \]
+%  The DAE effectively learns the score of the smoothed density $q_\sigma(x)$.
+%}
+
+\block{\Large\bfseries From DAE to Score Matching}{
+
+\begin{minipage}[t]{0.47\linewidth}
+  \textbf{\large Why Scores?}\\[-1.5em]
+  
+  - Likelihood is intractable due to the constant $ Z = \int \tilde{p}(x)\,dx$.
+  
+  - Score : \\
+  $\nabla_x \log p(x)
+     = \nabla_x \log \tilde{p}(x)
+     - \underbrace{\nabla_x \log Z}_{0}$
+
+\end{minipage}
+\hfill
+\vrule width 1pt
+\hfill
+\begin{minipage}[t]{0.47\linewidth}
+
+  \textbf{\large Equivalence}\\[-2.8em]
+
+  \[
+    \text{Minimizing Denoising Error}
+  \]
+  \[
+    \iff
+  \]
+  \[
+    \text{Score Matching}
+  \]
+
+  (Vincent, 2011).
+
+\end{minipage}
+
+\vspace{0.1em}
+
+\centering
+\includegraphics[width=0.75\linewidth]{scoresdae.png}
+
+}
+
+% ==================== COLUMN 2 ====================
+\column{0.36}
+
+% --- KEY INSIGHT BLOCK ---
+\block{\Large\bfseries $\star$ Key Insight}{
+  \large
+  \textbf{Denoising Autoencoders} learn the local score of a smoothed data density:\\
+  undoing Gaussian noise is equivalent to following the gradient of log-likelihood.
+
+  \vspace{0.6em}
+  \textbf{Noise-Conditional Score Networks} extend this to multiple noise scales,\\
+  providing stable score estimates both near and far from the data manifold.
+
+  \vspace{0.6em}
+  \textbf{Annealed Langevin Dynamics} then uses these scores to generate samples,\\
+  progressively shaping pure noise into the structure of real data.
+}
+% -------------------------
+\block{\Large\bfseries Why Plain Score Matching Fails}{
+  Real data lives on a \textbf{thin low-dimensional manifold}
+  inside a high-dimensional space.  
+  Near this manifold, the score is meaningful;
+  far away, density is almost zero and the score becomes \textbf{ill-conditioned}.
+
+  \vspace{0.6em}
+  As a result, \textbf{naive single-scale score matching} produces
+  noisy, unreliable gradients off the manifold,  
+  causing Langevin sampling to \textbf{mix poorly or even diverge}.
+
+  \vspace{0.6em}
+  These geometric limitations make a single-scale score model insufficient,  
+  motivating \textbf{multiscale noise levels} and the NCSN framework.
+}
+
+\block{\Large\bfseries Noise-Conditional Score Networks}{
+  A single network \(s_\theta(x,\sigma)\) learns the score of the 
+  \textbf{data + Gaussian noise} at multiple noise scales 
+  \(\sigma_1 > \cdots > \sigma_L\).
+
+  \vspace{0.6em}
+  Training uses \textbf{denoising score matching at each level}:
+  \[
+    \mathcal{L}(\theta)=\frac{1}{L}\sum_{i=1}^L \sigma_i^{2} 
+    \mathbb{E}\Bigl[
+      \| s_\theta(\tilde{x},\sigma_i)
+        + \tfrac{\tilde{x}-x}{\sigma_i^2}\|^2
+    \Bigr].
+  \]
+
+  \vspace{0.6em}
+  \textbf{Large \(\sigma\):} captures global, coarse structure.\\
+  \textbf{Small \(\sigma\):} captures fine, detailed variations.
+
+  \vspace{0.4em}
+  This multiscale view \emph{stabilizes score learning} far from the data manifold.
+}
+
+% ==================== COLUMN 3 ====================
+\column{0.32}
+\block{\Large\bfseries Algorithms}{
+  \begin{minipage}[t]{0.48\linewidth}
+    \textbf{\large Training: Multi-scale DSM}\\[0.4em]
+
+    \begin{enumerate}\itemsep0.55em
+      \item Draw a data sample: $x \sim p_{\text{data}}$.
+      \item Choose a noise level: $\sigma_i \in \{\sigma_1>\cdots>\sigma_L\}$.
+      \item Add Gaussian noise:
+        \[
+          \tilde{x} = x + \epsilon,\quad \epsilon\sim \mathcal{N}(0,\sigma_i^2 I).
+        \]
+      \item Minimize the denoising score-matching loss:
+        \[
+          \mathcal{L} =
+          \Bigl\| s_\theta(\tilde{x},\sigma_i)
+           + \tfrac{\tilde{x}-x}{\sigma_i^2}
+          \Bigr\|^2.
+        \]
+    \end{enumerate}
+
+    \vspace{0.8em}
+    {\normalsize\textbf{The network learns to point from noisy samples back toward the data manifold.}}\\[-0.2em]
+    {\normalsize\textbf{Large noise teaches global shape; small noise teaches sharp details.}}
+  \end{minipage}
+  \hfill
+  \begin{minipage}[t]{0.48\linewidth}
+    \textbf{\large Sampling: Annealed Langevin Dynamics}\\[0.4em]
+
+    \begin{enumerate}\itemsep0.55em
+      \item Initialize at highest noise:
+        \[
+          x_L \sim \mathcal{N}(0,I).
+        \]
+      \item For $i=L \to 1$ (coarse$\to$fine):
+        \begin{itemize}\itemsep0.3em
+          \item Run $T$ Langevin updates:
+            \[
+              x \gets x
+                + \alpha_i\, s_\theta(x,\sigma_i)
+                + \sqrt{2\alpha_i}\,\eta,
+            \]
+              where $\eta \sim \mathcal{N}(0,I)$.
+        \end{itemize}
+      \item Return $x_0$ as the final sample.
+    \end{enumerate}
+
+    \vspace{0.8em}
+    {\normalsize\textbf{Generates new samples by walking along the learned score field,}}\\[-0.2em]
+    {\normalsize\textbf{gradually reducing noise from coarse to fine.}}
+  \end{minipage}
+}
+
+\block{\Large\bfseries Experiments}{
+  \textbf{\large Toy 2D Generation with Annealed Langevin Dynamics}\\[0.2em]
+
+  \centering
+  % Ensure fig4.png exists or remove [demo] in \usepackage[demo]{graphicx}
+  \includegraphics[width=0.60\linewidth,height=0.15\textheight,keepaspectratio]{fig4.png}\\[-0.2em]
+  {\normalsize\itshape Fig.\ 4 (Song \& Ermon, 2019)\\Noise to structure: the trajectory sharpens as the sampler descends the score field.}
+}
+
+\end{columns}
+\end{document}
