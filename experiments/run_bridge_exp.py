@@ -18,7 +18,7 @@ from sampling import langevin_dynamics, annealed_langevin_dynamics
 # --- Config ---
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 LR = 1e-3
-EPOCHS = 5      # 5 is enough for a quick demo; use 10+ for better quality
+EPOCHS = 30
 BATCH_SIZE = 64
 SIGMA_BEGIN = 1.0
 SIGMA_END = 0.01
