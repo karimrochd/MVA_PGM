@@ -1,3 +1,4 @@
+
 # ==============================================================================
 # BRIDGE EXPERIMENT: MNIST
 # Single-Scale DAE vs. Multi-Scale NCSN
@@ -18,7 +19,7 @@ from sampling import langevin_dynamics, annealed_langevin_dynamics
 # --- Config ---
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 LR = 1e-3
-EPOCHS = 30           # Higher epochs for better quality
+EPOCHS = 20           # 30 Epochs for good convergence
 BATCH_SIZE = 64
 SIGMA_BEGIN = 1.0
 SIGMA_END = 0.01
@@ -32,11 +33,9 @@ def dsm_loss(model, x, sigma):
     noise = torch.randn_like(x)
     
     # Handle sigma reshaping for broadcasting
-    # If sigma is (B,), view as (B, 1, 1, 1)
     if sigma.dim() == 1:
         sigma_reshaped = sigma.view(-1, 1, 1, 1)
     else:
-        # If sigma is scalar, simple broadcasting works
         sigma_reshaped = sigma
         
     x_tilde = x + noise * sigma_reshaped
@@ -48,10 +47,6 @@ def dsm_loss(model, x, sigma):
     target = -noise / sigma_reshaped
     
     # 4. Weighted MSE Loss
-    # We weight by sigma^2 to stabilize training across scales
-    # Loss = 0.5 * || s - target ||^2 * sigma^2
-    # This simplifies algebraically to: 0.5 * || s*sigma + noise ||^2
-    # We use the explicit form here for clarity:
     loss = 0.5 * ((score_pred - target) ** 2).sum(dim=(1,2,3)) * (sigma ** 2)
     return loss.mean()
 
@@ -71,7 +66,6 @@ def train_model(model, loader, sigmas, mode='ncsn'):
             # Select Sigma
             if mode == 'dae':
                 # Baseline: Train on a single fixed moderate noise level (e.g., 0.1)
-                # We expand it to match batch size for consistency
                 sigma = torch.tensor([0.1], device=DEVICE).expand(data.shape[0])
             else:
                 # Ours: Randomly sample one sigma per image from the schedule
@@ -124,8 +118,16 @@ def main():
     print("Generating DAE samples...")
     # Generate 16 digits
     x_init = torch.rand(16, 1, 28, 28, device=DEVICE)
-    # Sample using the same fixed sigma used in training
-    x_dae = langevin_dynamics(model_dae, x_init, sigma=0.1, n_steps=200, step_size=2e-5) 
+    
+    # === TUNED SAMPLING FOR DAE ===
+    # Increased steps (200 -> 1000) and step_size (2e-5 -> 5e-4) to see structure
+    x_dae = langevin_dynamics(
+        model_dae, 
+        x_init, 
+        sigma=0.1, 
+        n_steps=1000, 
+        step_size=5e-4
+    ) 
     
     # ==========================================
     # EXPERIMENT B: Ours (Song NCSN)
@@ -145,8 +147,16 @@ def main():
     
     print("Generating NCSN samples...")
     x_init = torch.rand(16, 1, 28, 28, device=DEVICE)
-    # Sample using annealing (High noise -> Low noise)
-    x_ncsn = annealed_langevin_dynamics(model_ncsn, x_init, sigmas, n_steps_each=20, epsilon=2e-5)
+    
+    # === TUNED SAMPLING FOR NCSN ===
+    # Increased steps per level (20 -> 100) and adjusted epsilon (5e-6)
+    x_ncsn = annealed_langevin_dynamics(
+        model_ncsn, 
+        x_init, 
+        sigmas, 
+        n_steps_each=100, 
+        epsilon=5e-6
+    )
     
     # ==========================================
     # PLOT RESULTS
@@ -164,7 +174,6 @@ def main():
 
     fig, axs = plt.subplots(1, 2, figsize=(14, 6))
     
-    # Use raw strings (r"...") to avoid SyntaxWarning with latex escapes
     show(x_dae, axs[0], 
          r"Baseline (Vincent DAE)" + "\n" + r"Single scale training ($\sigma=0.1$)" + "\n" + "Standard Langevin")
     
