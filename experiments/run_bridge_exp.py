@@ -18,7 +18,7 @@ from sampling import langevin_dynamics, annealed_langevin_dynamics
 # --- Config ---
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 LR = 1e-3
-EPOCHS = 30
+EPOCHS = 30           # Higher epochs for better quality
 BATCH_SIZE = 64
 SIGMA_BEGIN = 1.0
 SIGMA_END = 0.01
@@ -117,6 +117,10 @@ def main():
     model_dae = ScoreUNet().to(DEVICE)
     model_dae = train_model(model_dae, loader, sigmas, mode='dae')
     
+    # --- SAVE WEIGHTS ---
+    torch.save(model_dae.state_dict(), 'model_dae_mnist.pth')
+    print("Saved Baseline model to 'model_dae_mnist.pth'")
+    
     print("Generating DAE samples...")
     # Generate 16 digits
     x_init = torch.rand(16, 1, 28, 28, device=DEVICE)
@@ -134,6 +138,10 @@ def main():
     
     model_ncsn = ScoreUNet().to(DEVICE)
     model_ncsn = train_model(model_ncsn, loader, sigmas, mode='ncsn')
+    
+    # --- SAVE WEIGHTS ---
+    torch.save(model_ncsn.state_dict(), 'model_ncsn_mnist.pth')
+    print("Saved NCSN model to 'model_ncsn_mnist.pth'")
     
     print("Generating NCSN samples...")
     x_init = torch.rand(16, 1, 28, 28, device=DEVICE)
@@ -156,11 +164,12 @@ def main():
 
     fig, axs = plt.subplots(1, 2, figsize=(14, 6))
     
+    # Use raw strings (r"...") to avoid SyntaxWarning with latex escapes
     show(x_dae, axs[0], 
-         "Baseline (Vincent DAE)\nSingle scale training ($\sigma=0.1$)\nStandard Langevin")
+         r"Baseline (Vincent DAE)" + "\n" + r"Single scale training ($\sigma=0.1$)" + "\n" + "Standard Langevin")
     
     show(x_ncsn, axs[1], 
-         "Ours (Song NCSN)\nMulti-scale training ($\sigma_1 \\to \sigma_L$)\nAnnealed Langevin")
+         r"Ours (Song NCSN)" + "\n" + r"Multi-scale training ($\sigma_1 \to \sigma_L$)" + "\n" + "Annealed Langevin")
     
     plt.tight_layout()
     plt.savefig('bridge_experiment_mnist.png')
