@@ -1,8 +1,11 @@
-
 # ==============================================================================
 # BRIDGE EXPERIMENT: MNIST
 # Single-Scale DAE vs. Multi-Scale NCSN
 # ==============================================================================
+
+import matplotlib
+# CRITICAL FIX FOR CLUSTER: Use 'Agg' backend to save files without a screen
+matplotlib.use('Agg') 
 
 import torch
 import torch.optim as optim
@@ -10,26 +13,41 @@ import numpy as np
 import matplotlib.pyplot as plt
 from torchvision.utils import make_grid
 import time
+from torchvision import datasets, transforms
+from torch.utils.data import DataLoader
 
-# Imports
-from data_utils import get_mnist_data
+# Imports from your local files
 from models_mnist import ScoreUNet
 from sampling import langevin_dynamics, annealed_langevin_dynamics
 
 # --- Config ---
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 LR = 1e-3
-EPOCHS = 20           # 30 Epochs for good convergence
+EPOCHS = 10           # Reduced to 10 for faster iteration
 BATCH_SIZE = 64
 SIGMA_BEGIN = 1.0
 SIGMA_END = 0.01
 NUM_SIGMAS = 10
 
-# --- Loss Function for Images ---
-def dsm_loss(model, x, sigma):
-    # x: (B, 1, 28, 28)
+# ------------------------------------------------------------------------------
+# Data Loader
+# ------------------------------------------------------------------------------
+def get_mnist_data(batch_size=64):
+    transform = transforms.Compose([
+        transforms.ToTensor(),
+        # Normalize inputs to roughly [-1, 1] for better Score Matching stability
+        transforms.Normalize((0.5,), (0.5,)) 
+    ])
     
-    # 1. Perturb data
+    # Download to a local folder './data'
+    dataset = datasets.MNIST(root='./data', train=True, download=True, transform=transform)
+    loader = DataLoader(dataset, batch_size=batch_size, shuffle=True, drop_last=True)
+    return loader
+
+# ------------------------------------------------------------------------------
+# Loss Function (Denoising Score Matching)
+# ------------------------------------------------------------------------------
+def dsm_loss(model, x, sigma):
     noise = torch.randn_like(x)
     
     # Handle sigma reshaping for broadcasting
@@ -40,16 +58,20 @@ def dsm_loss(model, x, sigma):
         
     x_tilde = x + noise * sigma_reshaped
     
-    # 2. Predict Score
+    # Predict Score
     score_pred = model(x_tilde, sigma)
     
-    # 3. Target Score: -noise / sigma
+    # Target Score: -noise / sigma
     target = -noise / sigma_reshaped
     
-    # 4. Weighted MSE Loss
+    # Weighted MSE Loss
+    # We weight by sigma^2 to stabilize the objective across scales
     loss = 0.5 * ((score_pred - target) ** 2).sum(dim=(1,2,3)) * (sigma ** 2)
     return loss.mean()
 
+# ------------------------------------------------------------------------------
+# Training Loop
+# ------------------------------------------------------------------------------
 def train_model(model, loader, sigmas, mode='ncsn'):
     optimizer = optim.Adam(model.parameters(), lr=LR)
     model.train()
@@ -65,10 +87,10 @@ def train_model(model, loader, sigmas, mode='ncsn'):
             
             # Select Sigma
             if mode == 'dae':
-                # Baseline: Train on a single fixed moderate noise level (e.g., 0.1)
+                # Baseline: Train on a single fixed noise level
                 sigma = torch.tensor([0.1], device=DEVICE).expand(data.shape[0])
             else:
-                # Ours: Randomly sample one sigma per image from the schedule
+                # Ours: Randomly sample one sigma per image
                 idx = torch.randint(0, len(sigmas), (data.shape[0],), device=DEVICE)
                 sigma = sigmas[idx]
             
@@ -79,21 +101,20 @@ def train_model(model, loader, sigmas, mode='ncsn'):
             
             total_loss += loss.item()
             
-            # LOGGING: Print every 100 batches
-            if batch_idx % 100 == 0:
-                print(f"  Epoch {epoch+1}/{EPOCHS} | Batch {batch_idx}/{len(loader)} | Loss: {loss.item():.4f}")
-            
         avg_loss = total_loss / len(loader)
-        elapsed = time.time() - start_time
-        print(f"Epoch {epoch+1} Complete ({elapsed:.1f}s) | Avg Loss: {avg_loss:.4f}")
+        # Log once per epoch
+        print(f"Epoch {epoch+1} | Avg Loss: {avg_loss:.4f}")
         
     return model
 
+# ------------------------------------------------------------------------------
+# Main Execution
+# ------------------------------------------------------------------------------
 def main():
-    # 1. Setup Data & Noise Schedule
     print("Loading MNIST...")
     loader = get_mnist_data(batch_size=BATCH_SIZE)
     
+    # Geometric sequence of sigmas
     sigmas = torch.tensor(
         np.exp(np.linspace(np.log(SIGMA_BEGIN), np.log(SIGMA_END), NUM_SIGMAS)),
         dtype=torch.float32, device=DEVICE
@@ -101,61 +122,39 @@ def main():
     
     # ==========================================
     # EXPERIMENT A: Baseline (Vincent DAE)
-    # Train on SINGLE sigma, Sample with STANDARD Langevin
     # ==========================================
-    print("\n" + "="*40)
-    print("1. Running Baseline (Vincent DAE)")
-    print("Goal: Show that single-scale models produce noisy/blurry samples.")
-    print("="*40)
-    
+    print("\n1. Running Baseline (Vincent DAE)")
     model_dae = ScoreUNet().to(DEVICE)
     model_dae = train_model(model_dae, loader, sigmas, mode='dae')
     
-    # --- SAVE WEIGHTS ---
-    torch.save(model_dae.state_dict(), 'model_dae_mnist.pth')
-    print("Saved Baseline model to 'model_dae_mnist.pth'")
-    
     print("Generating DAE samples...")
-    # Generate 16 digits
-    x_init = torch.rand(16, 1, 28, 28, device=DEVICE)
+    # Initialize with Gaussian Noise
+    x_init = torch.randn(16, 1, 28, 28, device=DEVICE)
     
-    # === TUNED SAMPLING FOR DAE ===
-    # Increased steps (200 -> 1000) and step_size (2e-5 -> 5e-4) to see structure
     x_dae = langevin_dynamics(
         model_dae, 
         x_init, 
         sigma=0.1, 
         n_steps=1000, 
-        step_size=5e-4
+        step_size=1e-4 
     ) 
     
     # ==========================================
     # EXPERIMENT B: Ours (Song NCSN)
-    # Train on MULTIPLE sigmas, Sample with ANNEALED Langevin
     # ==========================================
-    print("\n" + "="*40)
-    print("2. Running Ours (Song NCSN)")
-    print("Goal: Show that annealing cleans up samples.")
-    print("="*40)
-    
+    print("\n2. Running Ours (Song NCSN)")
     model_ncsn = ScoreUNet().to(DEVICE)
     model_ncsn = train_model(model_ncsn, loader, sigmas, mode='ncsn')
     
-    # --- SAVE WEIGHTS ---
-    torch.save(model_ncsn.state_dict(), 'model_ncsn_mnist.pth')
-    print("Saved NCSN model to 'model_ncsn_mnist.pth'")
-    
     print("Generating NCSN samples...")
-    x_init = torch.rand(16, 1, 28, 28, device=DEVICE)
+    x_init = torch.randn(16, 1, 28, 28, device=DEVICE)
     
-    # === TUNED SAMPLING FOR NCSN ===
-    # Increased steps per level (20 -> 100) and adjusted epsilon (5e-6)
     x_ncsn = annealed_langevin_dynamics(
         model_ncsn, 
         x_init, 
         sigmas, 
         n_steps_each=100, 
-        epsilon=5e-6
+        epsilon=2e-5
     )
     
     # ==========================================
@@ -164,26 +163,30 @@ def main():
     print("\nPlotting results...")
     
     def show(img_tensor, ax, title):
-        # Clamp between 0 and 1 for valid image display
-        img_tensor = img_tensor.detach().cpu().clamp(0, 1)
+        # We trained on [-1, 1], so we un-normalize to [0, 1] for display
+        img_tensor = (img_tensor * 0.5 + 0.5).clamp(0, 1)
         grid = make_grid(img_tensor, nrow=4, padding=2)
-        # Permute (C, H, W) -> (H, W, C) for Matplotlib
-        ax.imshow(grid.permute(1, 2, 0).numpy(), cmap='gray')
+        ax.imshow(grid.permute(1, 2, 0).cpu().numpy(), cmap='gray')
         ax.set_title(title)
         ax.axis('off')
 
     fig, axs = plt.subplots(1, 2, figsize=(14, 6))
     
+    # Using raw strings r"..." to fix the \sigma escape warning
     show(x_dae, axs[0], 
-         r"Baseline (Vincent DAE)" + "\n" + r"Single scale training ($\sigma=0.1$)" + "\n" + "Standard Langevin")
+         r"Baseline (DAE)" + "\n" + r"Fixed $\sigma=0.1$")
     
     show(x_ncsn, axs[1], 
-         r"Ours (Song NCSN)" + "\n" + r"Multi-scale training ($\sigma_1 \to \sigma_L$)" + "\n" + "Annealed Langevin")
+         r"Ours (NCSN)" + "\n" + r"Annealing $\sigma_1 \to \sigma_L$")
     
     plt.tight_layout()
-    plt.savefig('bridge_experiment_mnist.png')
-    plt.show()
-    print("Done! Saved plot to 'bridge_experiment_mnist.png'")
+    
+    # CLUSTER FIX: Save instead of show
+    output_filename = 'bridge_experiment_mnist.png'
+    plt.savefig(output_filename)
+    print(f"Done! Saved plot to '{output_filename}'")
+    
+    # plt.show() # Commented out to prevent crash
 
 if __name__ == "__main__":
     main()
