@@ -237,66 +237,84 @@
 }
 
 % ==================== COLUMN 3 ====================
+
+% ==================== COLUMN 3 (Karim) ====================
 \column{0.32}
-\block{\Large\bfseries Algorithms}{
-  \begin{minipage}[t]{0.48\linewidth}
-    \textbf{\large Training: Multi-scale DSM}\\[0.4em]
 
-    \begin{enumerate}\itemsep0.55em
-      \item Draw a data sample: $x \sim p_{\text{data}}$.
-      \item Choose a noise level: $\sigma_i \in \{\sigma_1>\cdots>\sigma_L\}$.
-      \item Add Gaussian noise:
-        \[
-          \tilde{x} = x + \epsilon,\quad \epsilon\sim \mathcal{N}(0,\sigma_i^2 I).
-        \]
-      \item Minimize the denoising score-matching loss:
-        \[
-          \mathcal{L} =
-          \Bigl\| s_\theta(\tilde{x},\sigma_i)
-           + \tfrac{\tilde{x}-x}{\sigma_i^2}
-          \Bigr\|^2.
-        \]
-    \end{enumerate}
+% --- UNIFYING VIEW BLOCK ---
+\block{\Large\bfseries The Bridge: From DAE to NCSN}{
+  \textbf{Vincent (2011)} proved that a Denoising Autoencoder (DAE) with noise $\sigma$ learns the score of the smoothed density $q_\sigma(x)$:
+  \[
+      \text{Optimal DAE Residual} \approx \sigma^2 \nabla_x \log q_\sigma(x)
+  \]
+  
+  \vspace{0.5em}
+  \textbf{The Problem:} A single $\sigma$ is insufficient.
+  \begin{itemize}
+      \item Small $\sigma$: Score is undefined off the manifold (blind to global structure).
+      \item Large $\sigma$: Valid score, but data is blurry.
+  \end{itemize}
 
-    \vspace{0.8em}
-    {\normalsize\textbf{The network learns to point from noisy samples back toward the data manifold.}}\\[-0.2em]
-    {\normalsize\textbf{Large noise teaches global shape; small noise teaches sharp details.}}
-  \end{minipage}
-  \hfill
-  \begin{minipage}[t]{0.48\linewidth}
-    \textbf{\large Sampling: Annealed Langevin Dynamics}\\[0.4em]
-
-    \begin{enumerate}\itemsep0.55em
-      \item Initialize at highest noise:
-        \[
-          x_L \sim \mathcal{N}(0,I).
-        \]
-      \item For $i=L \to 1$ (coarse$\to$fine):
-        \begin{itemize}\itemsep0.3em
-          \item Run $T$ Langevin updates:
-            \[
-              x \gets x
-                + \alpha_i\, s_\theta(x,\sigma_i)
-                + \sqrt{2\alpha_i}\,\eta,
-            \]
-              where $\eta \sim \mathcal{N}(0,I)$.
-        \end{itemize}
-      \item Return $x_0$ as the final sample.
-    \end{enumerate}
-
-    \vspace{0.8em}
-    {\normalsize\textbf{Generates new samples by walking along the learned score field,}}\\[-0.2em]
-    {\normalsize\textbf{gradually reducing noise from coarse to fine.}}
-  \end{minipage}
+  \vspace{0.5em}
+  \textbf{The Solution (Song \& Ermon, 2019):} 
+  Train a single network $s_\theta(x, \sigma)$ conditioned on \textbf{all} noise levels.
+  
+  \begin{center}
+      \textbf{High $\sigma \xrightarrow{Annealing} Low \sigma$}\\
+      \textit{(Global Navigation)} $\to$ \textit{(Fine Details)}
+  \end{center}
 }
 
-\block{\Large\bfseries Experiments}{
-  \textbf{\large Toy 2D Generation with Annealed Langevin Dynamics}\\[0.2em]
+% --- RESULTS BLOCK ---
+% --- RESULTS BLOCK ---
+\block{\Large\bfseries Results}{
+  NCSN achieves state-of-the-art results on CIFAR-10 without adversarial training, outperforming spectral normalized GANs (SNGAN).
 
+  \vspace{0.5em}
   \centering
-  % Ensure fig4.png exists or remove [demo] in \usepackage[demo]{graphicx}
-  \includegraphics[width=0.60\linewidth,height=0.15\textheight,keepaspectratio]{fig4.png}\\[-0.2em]
-  {\normalsize\itshape Fig.\ 4 (Song \& Ermon, 2019)\\Noise to structure: the trajectory sharpens as the sampler descends the score field.}
+  \begin{tikzfigure}[Inception and FID Scores on CIFAR-10 (Unconditional)]
+  \begin{tabular}{l c c}
+      \toprule
+      \textbf{Model} & \textbf{Inception} $\uparrow$ & \textbf{FID} $\downarrow$ \\
+      \midrule
+      PixelCNN & 4.60 & 65.93 \\
+      WGAN-GP & 7.86 & 36.40 \\
+      SNGAN & 8.22 & 21.70 \\
+      \textbf{NCSN (Ours)} & \textbf{8.87} & \textbf{25.32} \\
+      \bottomrule
+  \end{tabular}
+  \end{tikzfigure}
+  
+  \vspace{1em}
+  
+  % Images placed side-by-side
+  % Note: Ensure the widths sum to < 1.0 (e.g., 0.45 + 0.45 = 0.9)
+  \includegraphics[width=0.49\linewidth]{fig41.jpeg}
+  \hfill % This adds flexible space between the images
+  \includegraphics[width=0.49\linewidth]{fig42.jpeg}
+  
+  \vspace{0.2em}
+  {\small \textit{Generated samples from CIFAR-10.}}
+}
+
+% --- TAKEAWAYS / LIMITATIONS BLOCK ---
+\block{\Large\bfseries Takeaways \& Limitations}{
+  \begin{minipage}[t]{0.55\linewidth}
+    \textbf{\textcolor{titlefgcolor}{Key Takeaways}}
+    \begin{itemize}
+        \item \textbf{Denoising = Scores:} We can learn gradients without calculating partition functions.
+        \item \textbf{Conditioning:} One network can learn the geometry of data at multiple scales.
+        \item \textbf{Annealing:} Sampling must proceed from coarse to fine to mix between modes.
+    \end{itemize}
+  \end{minipage}
+  \hfill
+  \begin{minipage}[t]{0.40\linewidth}
+    \textbf{\textcolor{red}{Limitations}}
+    \begin{itemize}
+        \item \textbf{Slow Sampling:} Requires thousands of forward passes ($T \times L$).
+        \item \textbf{Bias:} $\sigma > 0$ implies we sample from a slightly smoothed distribution.
+    \end{itemize}
+  \end{minipage}
 }
 
 \end{columns}
