@@ -1,5 +1,5 @@
 import matplotlib
-matplotlib.use('Agg') # Cluster safety
+matplotlib.use('Agg')
 
 import torch
 import torch.nn as nn
@@ -13,14 +13,10 @@ from torchvision.utils import make_grid
 from torch.utils.data import DataLoader
 
 def DEBUG_PRINT(message):
-    """Prints a debugging message with a timestamp to track execution flow."""
     print(f"[DEBUG {time.strftime('%H:%M:%S')}] {message}", flush=True)
 
 DEBUG_PRINT("01. Imports complete. Starting PyTorch setup.")
 
-# ==============================================================================
-# 1. MODEL DEFINITION
-# ==============================================================================
 class ScoreUNet(nn.Module):
     def __init__(self):
         super().__init__()
@@ -50,9 +46,6 @@ class ScoreUNet(nn.Module):
         out = self.conv_out(cat2)
         return out
 
-# ==============================================================================
-# 2. SAMPLING FUNCTION
-# ==============================================================================
 def annealed_langevin_dynamics(score_model, x_init, sigmas, n_steps_each=100, epsilon=2e-5):
     x = x_init.clone().detach()
     sigma_L = sigmas[-1]
@@ -66,9 +59,6 @@ def annealed_langevin_dynamics(score_model, x_init, sigmas, n_steps_each=100, ep
             x = x + 0.5 * alpha * score + torch.sqrt(alpha) * z
     return x
 
-# ==============================================================================
-# 3. EXPERIMENT CONFIG & HELPERS
-# ==============================================================================
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 LR = 1e-3
 EPOCHS = 10
@@ -85,7 +75,6 @@ def get_mnist_data(batch_size=64):
         transforms.ToTensor(),
         transforms.Normalize((0.5,), (0.5,))
     ])
-    # download=True is safest; if data exists, it just verifies it.
     dataset = datasets.MNIST(root='./data', train=True, download=True, transform=transform)
     DEBUG_PRINT("04. MNIST loaded.")
     return DataLoader(dataset, batch_size=batch_size, shuffle=True, drop_last=True)
@@ -128,19 +117,14 @@ def train_model_for_L(L, loader):
         print(f"  L={L} | Epoch {epoch+1}/{EPOCHS} | Loss: {total_loss/len(loader):.4f} | Time: {time.time()-start_t:.1f}s", flush=True)
     return model, sigmas
 
-# ==============================================================================
-# 4. MAIN EXECUTION
-# ==============================================================================
 def main():
     DEBUG_PRINT("05. Entering main(). Starting process.")
     
-    # 1. Load Data
     loader = get_mnist_data(batch_size=BATCH_SIZE)
     DEBUG_PRINT("06. Data loading complete. Starting loops.")
 
     results = []
     
-    # 2. Iterate through L values (The Ablation)
     for L in L_VALUES:
         model, sigmas = train_model_for_L(L, loader)
         print(f"Generating samples for L={L}...", flush=True)
@@ -153,7 +137,6 @@ def main():
         )
         results.append((L, x_sample))
 
-    # 3. Plotting
     print("Plotting Ablation Results...", flush=True)
     fig, axs = plt.subplots(1, 3, figsize=(15, 6))
     for i, (L, sample) in enumerate(results):
