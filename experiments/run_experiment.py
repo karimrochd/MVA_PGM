@@ -1,13 +1,18 @@
 # ==============================================================================
-# MAIN EXPERIMENT
-# Orchestrates training and plotting for the report.
+# MAIN EXPERIMENT: 2D TOY DATA (Visual Proof & Mixing Analysis)
+# Orchestrates training and plotting for Sections 5.1 and 5.2 of the report.
 # ==============================================================================
+
+import matplotlib
+# CRITICAL FIX: Use 'Agg' backend to prevent crash on headless cluster
+matplotlib.use('Agg') 
 
 import torch
 import torch.optim as optim
 import numpy as np
 import matplotlib.pyplot as plt
 
+# Assumes these files exist in the same directory
 from data_utils import get_toy_data
 from models import ScoreNet
 from sampling import langevin_dynamics, annealed_langevin_dynamics
@@ -24,12 +29,8 @@ NUM_SIGMAS = 10
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 SEED = 0
 
-
 # ------------------------------------------------------------------------------
-# Denoising Score Matching Loss (Vincent 2011 / Song 2019).
-# For each sample i:
-#   L_i = 1/2 * || s_theta(x_tilde_i, sigma_i) + (x_tilde_i - x_i)/sigma_i^2 ||^2 * sigma_i^2
-# Then average over the batch.
+# Denoising Score Matching Loss (Vincent 2011 / Song 2019)
 # ------------------------------------------------------------------------------
 def dsm_loss(model, x, sigma):
     # x: (B,2)
@@ -112,7 +113,7 @@ def main():
         loss.backward()
         optimizer.step()
 
-        if epoch % 100 == 0:
+        if epoch % 1000 == 0: # Reduced print frequency to keep logs clean
             print(f"Epoch {epoch} | Loss: {loss.item():.4f}")
 
     print("Training Complete.")
@@ -148,16 +149,16 @@ def main():
 
     # Use true magnitudes for arrows (no full normalization)
     plt.quiver(
-    grid_points[:, 0],
-    grid_points[:, 1],
-    scores[:, 0],
-    scores[:, 1],
-    angles="xy",
-    scale_units="xy",
-    color="red",
-    alpha=0.8,
-    label="Learned Score",
-)
+        grid_points[:, 0],
+        grid_points[:, 1],
+        scores[:, 0],
+        scores[:, 1],
+        angles="xy",
+        scale_units="xy",
+        color="red",
+        alpha=0.8,
+        label="Learned Score",
+    )
 
     plt.title(f"Visual Proof: Learned Score Field (sigma={vis_sigma.item():.3f})")
     plt.xlim(-8, 8)
@@ -165,8 +166,11 @@ def main():
     plt.grid(True, alpha=0.3)
     plt.legend(loc="upper right")
     plt.tight_layout()
+    
+    # Save and Print (No plt.show)
     plt.savefig("exp1_vector_field.png", dpi=200)
-    plt.show()
+    print("Saved 'exp1_vector_field.png'")
+    plt.close() # Good practice to close figure
 
     # ---------------------------------------------------------
     # EXPERIMENT PART 2: THE MIXING PROBLEM
@@ -174,8 +178,9 @@ def main():
     # ---------------------------------------------------------
     print("Running Mixing Comparison...")
 
-    # Initial random noise (Uniform [-8, 8])
-    x_init = (torch.rand(1000, 2, device=DEVICE) * 16.0) - 8.0
+    # FIX: Initialize with Gaussian Noise scaled by largest sigma (theoretical standard)
+    # This covers the whole space better than uniform noise
+    x_init = torch.randn(1000, 2, device=DEVICE) * SIGMA_BEGIN
 
     # A. Standard Langevin (Fixed small sigma)
     fixed_sigma = sigmas[-1]  # Smallest sigma
@@ -230,9 +235,11 @@ def main():
     ax[1].grid(True, alpha=0.3)
 
     plt.tight_layout()
+    
+    # Save and Print (No plt.show)
     plt.savefig("exp1_mixing_comparison.png", dpi=200)
-    plt.show()
-
+    print("Saved 'exp1_mixing_comparison.png'")
+    plt.close()
 
 if __name__ == "__main__":
     main()

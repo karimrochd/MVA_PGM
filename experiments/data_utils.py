@@ -70,14 +70,21 @@ def plot_scatter(data, title="Dataset"):
     plt.show()
 
 
-
 def get_mnist_data(batch_size=64):
     transform = transforms.Compose([
-        transforms.ToTensor(), # Scales to [0, 1]
+        transforms.ToTensor(), 
+        # ADD NORMALIZATION for [-1, 1] range
+        transforms.Normalize((0.5,), (0.5,)),
     ])
     
-    # Download to a local folder './data'
-    dataset = datasets.MNIST(root='./data', train=True, download=True, transform=transform)
+    # CRITICAL FIX: Set download=False to prevent hangs on cluster I/O
+    # Data is assumed to have been downloaded previously.
+    dataset = datasets.MNIST(
+        root='./data', 
+        train=True, 
+        download=False, 
+        transform=transform
+    )
     
     # Create loader
     loader = DataLoader(dataset, batch_size=batch_size, shuffle=True, drop_last=True)
