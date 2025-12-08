@@ -4,7 +4,7 @@ This project implements and validates the theoretical connection between **Denoi
 
 The primary focus is verifying the necessity of **Annealed Langevin Dynamics** to overcome the mixing failures of single-scale score matching.
 
-## 🚀 Project Structure
+## Project Structure
 
 The repository is organized into distinct, clean directories for easy navigation:
 
@@ -17,24 +17,8 @@ The repository is organized into distinct, clean directories for easy navigation
 | `data/` | **Dataset Files.** Local storage for the MNIST dataset. | MNIST raw files |
 | `assets/` | **Reference Papers.** Key literature used in the project. | `Song2019.pdf`, `Vincent.pdf` |
 
-## ⚙️ Setup and Installation
 
-This project requires Python 3.8+ and standard scientific libraries.
-
-1.  **Activate Environment (if necessary):**
-    ```bash
-    source .venv/bin/activate
-    ```
-
-2.  **Install Dependencies:**
-    (Ensure you have PyTorch, NumPy, Matplotlib, and torchvision installed. If using pip, assuming your dependencies are in a `requirements.txt` file, which is often standard practice in projects of this nature):
-    ```bash
-    pip install torch torchvision numpy matplotlib
-    # Or, if you have a requirements file:
-    # pip install -r requirements.txt
-    ```
-
-## ▶️ Running Experiments
+## Running Experiments
 
 All execution scripts are located in the `scripts/` folder. Run them using the `-m` flag from the root directory to handle module imports correctly.
 
@@ -45,10 +29,3 @@ All execution scripts are located in the `scripts/` folder. Run them using the `
 | **Inpainting** | Demonstrate conditional generative capacity. | `python -m scripts.run_inpainting` |
 
 The generated images will be saved automatically into the corresponding `results/` subfolders (e.g., `results/ablation/`).
-
-## 📚 Deliverables
-
-The final project documentation can be found in the `docs/` directory:
-
-* **Report:** `docs/report/main.pdf`
-* **Poster:** `docs/poster/main.tex` (Compile this file using `pdflatex` within the `docs/poster/` directory).
