@@ -1,8 +1,18 @@
 # From Denoising to Scores: DAEs to Noise-Conditional Score Networks
 
-This project implements and validates the theoretical connection between **Denoising Autoencoders (DAE)** and **Noise-Conditional Score Networks (NCSN)**, demonstrating how multi-scale score estimation enables stable, high-quality generative modeling.
+This project implements and validates the theoretical link between **Denoising Autoencoders (DAE)** and **Noise-Conditional Score Networks (NCSN)**, showing how score estimation drives stable, high-quality generative modeling.
 
-The primary focus is verifying the necessity of **Annealed Langevin Dynamics** to overcome the mixing failures of single-scale score matching.
+Vincent (2011) proved that a Gaussian DAE estimates the score of a smoothed log-density, $r_\theta(x) - x \approx \sigma^2 \nabla_x \log q_\sigma(x)$, establishing denoising score matching as equivalent to score matching on the noise-perturbed data. We build on this result to connect the DAE objective directly to score matching.
+
+![A DAE learns a score](docs/poster/figures/scoresdae.png)
+
+Noise-Conditional Score Networks (NCSN) extend this idea by training a score network conditioned on the noise level, enabling consistent score estimates across a noise schedule [Song & Ermon, 2019]. We verify experimentally that single-scale Langevin dynamics gets trapped in energy wells, which motivates **Annealed Langevin Dynamics (ALD)** to traverse the noise schedule without mode collapse. The NCSN + ALD results below highlight the improved sample quality and mixing versus single-scale.
+
+![NCSN + ALD mixing](docs/poster/figures/exp1_mixing_comparison.png)
+
+> *Vincent, P. 2011. A connection between score matching and denoising autoencoders. Neural Computation 23(7):1661–1674.*
+
+> *Song, Y. and Ermon, S. 2019. Generative Modeling by Estimating Gradients of the Data Distribution. NeurIPS 32.*
 
 ## Project Structure
 
