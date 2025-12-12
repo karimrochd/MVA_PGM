@@ -1,0 +1,184 @@
+{
+  "ablation": {
+    "20251212_111507_mnist_ablation": {
+      "config": {
+        "L_values": [
+          1,
+          10,
+          50
+        ],
+        "batch_size": 64,
+        "device": "cuda",
+        "epochs": 50,
+        "loss": {
+          "type": "DSM",
+          "weighting": "sigma^2"
+        },
+        "lr": 0.001,
+        "model": {
+          "output_scaling": "out / sigma",
+          "sigma_conditioning": "concat sigma as extra channel (sigma map)",
+          "type": "ScoreUNet (src/models_mnist.py)"
+        },
+        "sampler": {
+          "epsilon": 2e-05,
+          "n_steps_each_L1": 1000,
+          "n_steps_each_else": 200,
+          "type": "annealed_langevin_dynamics"
+        },
+        "script": "scripts/run_ablation.py",
+        "seed": 0,
+        "sigma_begin": 10.0,
+        "sigma_end": 0.01
+      },
+      "env": {
+        "cuda_available": true,
+        "cuda_version": "12.4",
+        "gpu_name": "NVIDIA GeForce RTX 3080",
+        "python": "3.10.12",
+        "torch": "2.6.0+cu124"
+      },
+      "training": {
+        "train_log_L50": {
+          "epochs": 50,
+          "loss_start": 105.34317674097409,
+          "loss_end": 30.915584356578716,
+          "loss_min": 30.459400054866503,
+          "loss_max": 105.34317674097409,
+          "mean_epoch_time_sec": 12.166157722473145
+        },
+        "train_log_L10": {
+          "epochs": 50,
+          "loss_start": 119.78529536227916,
+          "loss_end": 31.626739050051956,
+          "loss_min": 31.626739050051956,
+          "loss_max": 119.78529536227916,
+          "mean_epoch_time_sec": 12.23848026752472
+        },
+        "train_log_L1": {
+          "epochs": 50,
+          "loss_start": 228.40194477419206,
+          "loss_end": 67.93054905568778,
+          "loss_min": 67.93054905568778,
+          "loss_max": 228.40194477419206,
+          "mean_epoch_time_sec": 12.151455216407776
+        }
+      },
+      "samples": {
+        "samples_L50": {
+          "num_samples": 16,
+          "mean_pixel": -0.9532595276832581,
+          "std_pixel": 0.2714477479457855,
+          "min_pixel": -1.040733814239502,
+          "max_pixel": 1.0250352621078491,
+          "mean_l2_norm": 27.751216888427734,
+          "has_nan": false
+        },
+        "samples_L1": {
+          "num_samples": 16,
+          "mean_pixel": -0.04070679470896721,
+          "std_pixel": 0.7479531764984131,
+          "min_pixel": -1.486593246459961,
+          "max_pixel": 3.592423677444458,
+          "mean_l2_norm": 20.97001075744629,
+          "has_nan": false
+        },
+        "samples_L10": {
+          "num_samples": 16,
+          "mean_pixel": -0.6166703104972839,
+          "std_pixel": 0.7436118721961975,
+          "min_pixel": -1.039212703704834,
+          "max_pixel": 1.0360989570617676,
+          "mean_l2_norm": 27.04811668395996,
+          "has_nan": false
+        }
+      }
+    }
+  },
+  "bridge": {
+    "20251212_135628_mnist_bridge": {
+      "config": {
+        "baseline": {
+          "sampling": {
+            "n_steps": 1000,
+            "step_size": 0.0001,
+            "type": "Langevin"
+          },
+          "sigma": 0.1,
+          "training": "reconstruction MSE",
+          "type": "Vincent DAE (reconstruction \u2192 score)"
+        },
+        "device": "cuda",
+        "model": {
+          "arch": "ScoreUNet",
+          "conditioning": "concat sigma map",
+          "output_scaling": "out / sigma"
+        },
+        "ncsn": {
+          "sampling": {
+            "epsilon": 2e-05,
+            "n_steps_each": 200,
+            "type": "Annealed Langevin"
+          },
+          "sigmas": {
+            "begin": 5.0,
+            "end": 0.01,
+            "num": 10,
+            "schedule": "geometric"
+          },
+          "training": "DSM (sigma^2 weighted)",
+          "type": "Song & Ermon (2019)"
+        },
+        "script": "scripts/run_bridge_exp.py",
+        "seed": 0
+      },
+      "env": {
+        "cuda_available": true,
+        "cuda_version": "12.4",
+        "gpu_name": "NVIDIA GeForce RTX 3090",
+        "python": "3.10.12",
+        "torch": "2.6.0+cu124"
+      },
+      "training": {
+        "train_log_ncsn": {
+          "epochs": 50,
+          "loss_start": 109.09040168916911,
+          "loss_end": 33.98428662685854,
+          "loss_min": 33.98428662685854,
+          "loss_max": 109.09040168916911,
+          "mean_epoch_time_sec": 11.821293754577637
+        },
+        "train_log_dae": {
+          "epochs": 50,
+          "loss_start": 5.681960749651605,
+          "loss_end": 0.4075931098188891,
+          "loss_min": 0.4074374039755814,
+          "loss_max": 5.681960749651605,
+          "mean_epoch_time_sec": 11.720398225784301
+        }
+      },
+      "samples": {
+        "samples_dae": {
+          "num_samples": 16,
+          "mean_pixel": -0.11942404508590698,
+          "std_pixel": 0.7400509715080261,
+          "min_pixel": -1.4325761795043945,
+          "max_pixel": 1.493703007698059,
+          "mean_l2_norm": 20.98509407043457,
+          "has_nan": false
+        },
+        "samples_ncsn": {
+          "num_samples": 16,
+          "mean_pixel": -0.7332488298416138,
+          "std_pixel": 0.6341352462768555,
+          "min_pixel": -1.0337942838668823,
+          "max_pixel": 1.0389108657836914,
+          "mean_l2_norm": 27.142623901367188,
+          "has_nan": false
+        }
+      }
+    }
+  },
+  "inpainting": {},
+  "mixing": {}
+}

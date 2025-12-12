@@ -1,0 +1,35 @@
+{
+  "baseline": {
+    "sampling": {
+      "n_steps": 1000,
+      "step_size": 0.0001,
+      "type": "Langevin"
+    },
+    "sigma": 0.1,
+    "training": "reconstruction MSE",
+    "type": "Vincent DAE (reconstruction \u2192 score)"
+  },
+  "device": "cuda",
+  "model": {
+    "arch": "ScoreUNet",
+    "conditioning": "concat sigma map",
+    "output_scaling": "out / sigma"
+  },
+  "ncsn": {
+    "sampling": {
+      "epsilon": 2e-05,
+      "n_steps_each": 200,
+      "type": "Annealed Langevin"
+    },
+    "sigmas": {
+      "begin": 5.0,
+      "end": 0.01,
+      "num": 10,
+      "schedule": "geometric"
+    },
+    "training": "DSM (sigma^2 weighted)",
+    "type": "Song & Ermon (2019)"
+  },
+  "script": "scripts/run_bridge_exp.py",
+  "seed": 0
+}

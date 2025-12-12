@@ -1,0 +1,30 @@
+{
+  "L_values": [
+    1,
+    10,
+    50
+  ],
+  "batch_size": 64,
+  "device": "cuda",
+  "epochs": 50,
+  "loss": {
+    "type": "DSM",
+    "weighting": "sigma^2"
+  },
+  "lr": 0.001,
+  "model": {
+    "output_scaling": "out / sigma",
+    "sigma_conditioning": "concat sigma as extra channel (sigma map)",
+    "type": "ScoreUNet (src/models_mnist.py)"
+  },
+  "sampler": {
+    "epsilon": 2e-05,
+    "n_steps_each_L1": 1000,
+    "n_steps_each_else": 200,
+    "type": "annealed_langevin_dynamics"
+  },
+  "script": "scripts/run_ablation.py",
+  "seed": 0,
+  "sigma_begin": 10.0,
+  "sigma_end": 0.01
+}
