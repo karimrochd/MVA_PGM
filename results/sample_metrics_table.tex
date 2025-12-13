@@ -1,0 +1,19 @@
+\begin{table}[H]
+\centering
+\small
+\setlength{\tabcolsep}{5pt}
+\renewcommand{\arraystretch}{1.15}
+\begin{tabular}{@{}lrrrrrrrrr@{}}
+\toprule
+Run & N & \% finite & \% in [-1,1] & \% sat & $\mathbb{E}|x|$ & $\mathrm{Std}(x)$ & TV & Pair L2 & PixVar \\
+\midrule
+samples\_L1.pt & 16 & 100.0 & 82.2 & 21.8 & 0.656 & 0.748 & 1.517 & 27.66 & 0.4580 \\
+samples\_L10.pt & 16 & 100.0 & 57.9 & 71.0 & 0.951 & 0.744 & 0.295 & 23.82 & 0.3518 \\
+samples\_L50.pt & 16 & 100.0 & 51.9 & 80.1 & 0.987 & 0.271 & 0.091 & 9.64 & 0.0654 \\
+samples\_dae.pt & 16 & 100.0 & 81.2 & 20.2 & 0.667 & 0.740 & 1.516 & 27.71 & 0.4586 \\
+samples\_ncsn.pt & 16 & 100.0 & 61.0 & 70.1 & 0.956 & 0.634 & 0.241 & 21.05 & 0.2677 \\
+\bottomrule
+\end{tabular}
+\caption{\textbf{MNIST sampling diagnostics (saved tensors)} Simple diagnostics computed from saved sample tensors. \% sat uses $|x|\ge 0.99$.}
+\label{tab:mnist_sample_diagnostics}
+\end{table}

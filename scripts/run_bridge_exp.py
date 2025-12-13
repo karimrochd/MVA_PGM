@@ -1,6 +1,7 @@
 import os
 import sys
 import time
+import argparse
 
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 if PROJECT_ROOT not in sys.path:
@@ -22,10 +23,6 @@ from src.sampling import langevin_dynamics, annealed_langevin_dynamics
 from src.run_utils import set_seed, make_run_dir, save_json, env_info
 from src.dae_wrappers import DAEWrapper, dae_reconstruction_loss
 
-
-# =============================================================================
-# CONFIG
-# =============================================================================
 
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -50,46 +47,6 @@ ALD_EPSILON = 2e-5
 
 SEED = 0
 
-CONFIG = {
-    "script": "scripts/run_bridge_exp.py",
-    "seed": SEED,
-    "device": str(DEVICE),
-    "baseline": {
-        "type": "Vincent DAE (reconstruction → score)",
-        "sigma": BASELINE_SIGMA,
-        "training": "reconstruction MSE",
-        "sampling": {
-            "type": "Langevin",
-            "n_steps": LD_N_STEPS,
-            "step_size": LD_STEP_SIZE,
-        },
-    },
-    "ncsn": {
-        "type": "Song & Ermon (2019)",
-        "sigmas": {
-            "begin": SIGMA_BEGIN,
-            "end": SIGMA_END,
-            "num": NUM_SIGMAS,
-            "schedule": "geometric",
-        },
-        "training": "DSM (sigma^2 weighted)",
-        "sampling": {
-            "type": "Annealed Langevin",
-            "n_steps_each": ALD_N_STEPS_EACH,
-            "epsilon": ALD_EPSILON,
-        },
-    },
-    "model": {
-        "arch": "ScoreUNet",
-        "conditioning": "concat sigma map",
-        "output_scaling": "out / sigma",
-    },
-}
-
-
-# =============================================================================
-# HELPERS
-# =============================================================================
 
 def debug(msg: str):
     print(f"[DEBUG {time.strftime('%H:%M:%S')}] {msg}", flush=True)
@@ -104,7 +61,6 @@ def get_mnist_loader(batch_size: int):
         ds = datasets.MNIST(root="./data", train=True, download=False, transform=transform)
     except Exception:
         ds = datasets.MNIST(root="./data", train=True, download=True, transform=transform)
-
     return DataLoader(ds, batch_size=batch_size, shuffle=True, drop_last=True)
 
 
@@ -115,16 +71,13 @@ def geometric_sigmas(sigma_begin, sigma_end, L, device):
 
 def dsm_loss(model, x, sigma):
     noise = torch.randn_like(x)
-
     if sigma.dim() == 1:
         sigma_r = sigma.view(-1, 1, 1, 1)
     else:
         sigma_r = sigma
-
     x_tilde = x + noise * sigma_r
     score_pred = model(x_tilde, sigma)
     target = -noise / sigma_r
-
     loss = 0.5 * ((score_pred - target) ** 2).sum(dim=(1, 2, 3)) * (sigma ** 2)
     return loss.mean()
 
@@ -133,110 +86,152 @@ def train_ncsn(model, loader, sigmas):
     optimizer = optim.Adam(model.parameters(), lr=LR)
     model.train()
     log = []
-
     for epoch in range(EPOCHS):
         total = 0.0
         start = time.time()
-
         for x, _ in loader:
             x = x.to(DEVICE)
             idx = torch.randint(0, len(sigmas), (x.size(0),), device=DEVICE)
             sigma = sigmas[idx]
-
             optimizer.zero_grad()
             loss = dsm_loss(model, x, sigma)
             loss.backward()
             optimizer.step()
             total += loss.item()
-
         avg = total / len(loader)
         sec = time.time() - start
         print(f"Epoch {epoch+1}/{EPOCHS} | NCSN | loss={avg:.4f} | {sec:.1f}s", flush=True)
         log.append({"epoch": epoch + 1, "avg_loss": float(avg), "sec": float(sec)})
-
     return model, log
 
 
-# =============================================================================
-# MAIN
-# =============================================================================
+def save_ckpt(path: str, model: torch.nn.Module):
+    torch.save({"state_dict": model.state_dict()}, path)
+
+
+def load_ckpt(path: str, model: torch.nn.Module):
+    obj = torch.load(path, map_location="cpu")
+    state = obj["state_dict"] if isinstance(obj, dict) and "state_dict" in obj else obj
+    model.load_state_dict(state)
+    return model
+
+
+def auto_nrow(n: int) -> int:
+    if n <= 16:
+        return 4
+    if n <= 64:
+        return 8
+    if n <= 256:
+        return 16
+    return 32
+
 
 def main():
-    out_dir = make_run_dir(root="results/bridge", name="mnist_bridge")
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--num_samples", type=int, default=256)
+    ap.add_argument("--only_sample", action="store_true", help="Skip training, load checkpoints from out_dir")
+    ap.add_argument("--out_dir", type=str, default=None, help="Use an existing run directory (for --only_sample)")
+    args = ap.parse_args()
+
     set_seed(SEED)
-    save_json(os.path.join(out_dir, "config.json"), CONFIG)
-    save_json(os.path.join(out_dir, "env.json"), env_info())
+
+    if args.out_dir is None:
+        out_dir = make_run_dir(root="results/bridge", name="mnist_bridge")
+        CONFIG = {
+            "script": "scripts/run_bridge_exp.py",
+            "seed": SEED,
+            "device": str(DEVICE),
+            "num_samples_default": args.num_samples,
+            "baseline": {
+                "type": "Vincent DAE (reconstruction → score)",
+                "sigma": BASELINE_SIGMA,
+                "training": "reconstruction MSE",
+                "sampling": {"type": "Langevin", "n_steps": LD_N_STEPS, "step_size": LD_STEP_SIZE},
+            },
+            "ncsn": {
+                "type": "Song & Ermon (2019)",
+                "sigmas": {"begin": SIGMA_BEGIN, "end": SIGMA_END, "num": NUM_SIGMAS, "schedule": "geometric"},
+                "training": "DSM (sigma^2 weighted)",
+                "sampling": {"type": "Annealed Langevin", "n_steps_each": ALD_N_STEPS_EACH, "epsilon": ALD_EPSILON},
+            },
+            "model": {"arch": "ScoreUNet", "conditioning": "concat sigma map", "output_scaling": "out / sigma"},
+        }
+        save_json(os.path.join(out_dir, "config.json"), CONFIG)
+        save_json(os.path.join(out_dir, "env.json"), env_info())
+    else:
+        out_dir = args.out_dir
+
     debug(f"Run directory: {out_dir}")
 
-    loader = get_mnist_loader(BATCH_SIZE)
+    loader = None if args.only_sample else get_mnist_loader(BATCH_SIZE)
     sigmas = geometric_sigmas(SIGMA_BEGIN, SIGMA_END, NUM_SIGMAS, DEVICE)
 
+    dae_ckpt = os.path.join(out_dir, "ckpt_dae_denoiser.pt")
+    ncsn_ckpt = os.path.join(out_dir, "ckpt_ncsn.pt")
+
     # -------------------------------------------------------------------------
-    # 1) TRUE VINCENT DAE BASELINE
+    # 1) DAE BASELINE
     # -------------------------------------------------------------------------
-    print("\n1) Training Vincent DAE baseline (reconstruction MSE)", flush=True)
+    if args.only_sample:
+        if not os.path.exists(dae_ckpt):
+            raise FileNotFoundError(f"Missing DAE checkpoint: {dae_ckpt}")
+        denoiser = ScoreUNet().to(DEVICE)
+        load_ckpt(dae_ckpt, denoiser)
+    else:
+        print("\n1) Training Vincent DAE baseline (reconstruction MSE)", flush=True)
+        denoiser = ScoreUNet().to(DEVICE)
+        opt = optim.Adam(denoiser.parameters(), lr=LR)
+        denoiser.train()
+        dae_log = []
+        for epoch in range(EPOCHS):
+            total = 0.0
+            start = time.time()
+            for x, _ in loader:
+                x = x.to(DEVICE)
+                opt.zero_grad()
+                loss = dae_reconstruction_loss(denoiser, x, BASELINE_SIGMA)
+                loss.backward()
+                opt.step()
+                total += loss.item()
+            avg = total / len(loader)
+            sec = time.time() - start
+            print(f"Epoch {epoch+1}/{EPOCHS} | DAE | recon={avg:.4f} | {sec:.1f}s", flush=True)
+            dae_log.append({"epoch": epoch + 1, "avg_loss": float(avg), "sec": float(sec)})
 
-    denoiser = ScoreUNet().to(DEVICE)
-    opt = optim.Adam(denoiser.parameters(), lr=LR)
-    denoiser.train()
+        save_json(os.path.join(out_dir, "train_log_dae.json"), dae_log)
+        save_ckpt(dae_ckpt, denoiser)
 
-    dae_log = []
-
-    for epoch in range(EPOCHS):
-        total = 0.0
-        start = time.time()
-
-        for x, _ in loader:
-            x = x.to(DEVICE)
-            opt.zero_grad()
-            loss = dae_reconstruction_loss(denoiser, x, BASELINE_SIGMA)
-            loss.backward()
-            opt.step()
-            total += loss.item()
-
-        avg = total / len(loader)
-        sec = time.time() - start
-        print(f"Epoch {epoch+1}/{EPOCHS} | DAE | recon={avg:.4f} | {sec:.1f}s", flush=True)
-        dae_log.append({"epoch": epoch + 1, "avg_loss": float(avg), "sec": float(sec)})
-
-    save_json(os.path.join(out_dir, "train_log_dae.json"), dae_log)
-
-    print("Sampling Vincent DAE (score-from-denoiser + Langevin)", flush=True)
+    print(f"Sampling Vincent DAE (N={args.num_samples})", flush=True)
     score_dae = DAEWrapper(denoiser, BASELINE_SIGMA).to(DEVICE).eval()
-
-    x_init = torch.randn(16, 1, 28, 28, device=DEVICE)
+    x_init = torch.randn(args.num_samples, 1, 28, 28, device=DEVICE)
     x_dae = langevin_dynamics(
-        score_dae,
-        x_init,
-        sigma=BASELINE_SIGMA,
-        n_steps=LD_N_STEPS,
-        step_size=LD_STEP_SIZE,
+        score_dae, x_init, sigma=BASELINE_SIGMA, n_steps=LD_N_STEPS, step_size=LD_STEP_SIZE
     )
-
-    torch.save({"samples": x_dae.cpu()}, os.path.join(out_dir, "samples_dae.pt"))
+    torch.save({"samples": x_dae.cpu()}, os.path.join(out_dir, f"samples_dae_N{args.num_samples}.pt"))
 
     # -------------------------------------------------------------------------
-    # 2) SONG & ERMON NCSN
+    # 2) NCSN
     # -------------------------------------------------------------------------
-    print("\n2) Training NCSN (multi-scale DSM)", flush=True)
+    if args.only_sample:
+        if not os.path.exists(ncsn_ckpt):
+            raise FileNotFoundError(f"Missing NCSN checkpoint: {ncsn_ckpt}")
+        ncsn = ScoreUNet().to(DEVICE)
+        load_ckpt(ncsn_ckpt, ncsn)
+    else:
+        print("\n2) Training NCSN (multi-scale DSM)", flush=True)
+        ncsn = ScoreUNet().to(DEVICE)
+        ncsn, ncsn_log = train_ncsn(ncsn, loader, sigmas)
+        save_json(os.path.join(out_dir, "train_log_ncsn.json"), ncsn_log)
+        save_ckpt(ncsn_ckpt, ncsn)
 
-    ncsn = ScoreUNet().to(DEVICE)
-    ncsn, ncsn_log = train_ncsn(ncsn, loader, sigmas)
-    save_json(os.path.join(out_dir, "train_log_ncsn.json"), ncsn_log)
-
-    print("Sampling NCSN (Annealed Langevin)", flush=True)
-    x_init = torch.randn(16, 1, 28, 28, device=DEVICE)
+    print(f"Sampling NCSN (N={args.num_samples})", flush=True)
+    x_init = torch.randn(args.num_samples, 1, 28, 28, device=DEVICE)
     x_ncsn = annealed_langevin_dynamics(
-        ncsn,
-        x_init,
-        sigmas,
-        n_steps_each=ALD_N_STEPS_EACH,
-        epsilon=ALD_EPSILON,
+        ncsn, x_init, sigmas, n_steps_each=ALD_N_STEPS_EACH, epsilon=ALD_EPSILON
     )
-
     torch.save(
         {"sigmas": sigmas.cpu(), "samples": x_ncsn.cpu()},
-        os.path.join(out_dir, "samples_ncsn.pt"),
+        os.path.join(out_dir, f"samples_ncsn_N{args.num_samples}.pt"),
     )
 
     # -------------------------------------------------------------------------
@@ -244,19 +239,20 @@ def main():
     # -------------------------------------------------------------------------
     print("Plotting comparison", flush=True)
     fig, axs = plt.subplots(1, 2, figsize=(14, 6))
+    nrow = auto_nrow(args.num_samples)
 
     def show(ax, t, title):
         t = (t * 0.5 + 0.5).clamp(0, 1)
-        grid = make_grid(t, nrow=4, padding=2)
+        grid = make_grid(t, nrow=nrow, padding=2)
         ax.imshow(grid.permute(1, 2, 0).cpu().numpy(), cmap="gray")
         ax.set_title(title)
         ax.axis("off")
 
-    show(axs[0], x_dae, f"Vincent DAE\n(score-from-denoiser, σ={BASELINE_SIGMA})")
-    show(axs[1], x_ncsn, "Song & Ermon NCSN\n(annealed σ₁ → σL)")
+    show(axs[0], x_dae, f"Vincent DAE | N={args.num_samples}")
+    show(axs[1], x_ncsn, f"NCSN | N={args.num_samples}")
 
     plt.tight_layout()
-    plt.savefig(os.path.join(out_dir, "bridge_experiment_mnist.png"), dpi=200)
+    plt.savefig(os.path.join(out_dir, f"bridge_experiment_mnist_N{args.num_samples}.png"), dpi=200)
     plt.close()
 
     print(f"Done. Results saved to {out_dir}", flush=True)

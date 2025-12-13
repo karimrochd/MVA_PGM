@@ -1,6 +1,5 @@
 import torch
 
-
 def langevin_dynamics(score_model, x_init, sigma, n_steps=100, step_size=1e-2):
     x = x_init.clone().detach()
 
@@ -49,3 +48,4 @@ def annealed_langevin_dynamics(score_model, x_init, sigmas, n_steps_each=100, ep
                 })
 
     return (x, stats) if return_stats else x
+
