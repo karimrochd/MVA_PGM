@@ -25,7 +25,6 @@ from src.dae_wrappers import DAEWrapper, dae_reconstruction_loss
 
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-# Quick run settings
 LR = 1e-3
 EPOCHS = 10
 BATCH_SIZE = 64
@@ -34,7 +33,6 @@ SIGMA_BEGIN = 1.0
 SIGMA_END = 0.01
 NUM_SIGMAS = 10
 
-# Vincent baseline sigma (fixed)
 BASELINE_SIGMA = 0.1
 
 # Sampling
@@ -188,9 +186,6 @@ def main():
     loader = get_mnist_loader(BATCH_SIZE)
     sigmas = geometric_sigmas(SIGMA_BEGIN, SIGMA_END, NUM_SIGMAS, DEVICE)
 
-    # -------------------------------------------------------------------------
-    # 1) Vincent DAE baseline
-    # -------------------------------------------------------------------------
     print("\n1) Training Vincent DAE baseline (reconstruction)", flush=True)
     denoiser = ScoreUNet().to(DEVICE)
     denoiser, dae_log = train_dae(denoiser, loader, sigma_scalar=BASELINE_SIGMA)
@@ -209,9 +204,7 @@ def main():
     )
     torch.save({"samples": x_dae.detach().cpu()}, os.path.join(out_dir, "samples_dae.pt"))
 
-    # -------------------------------------------------------------------------
-    # 2) NCSN multi-scale
-    # -------------------------------------------------------------------------
+
     print("\n2) Training NCSN (multi-scale DSM)", flush=True)
     ncsn = ScoreUNet().to(DEVICE)
     ncsn, ncsn_log = train_ncsn(ncsn, loader, sigmas)
@@ -231,9 +224,6 @@ def main():
         os.path.join(out_dir, "samples_ncsn.pt"),
     )
 
-    # -------------------------------------------------------------------------
-    # Plot
-    # -------------------------------------------------------------------------
     print("Plotting", flush=True)
     fig, axs = plt.subplots(1, 2, figsize=(14, 6))
 

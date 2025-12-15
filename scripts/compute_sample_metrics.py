@@ -35,9 +35,7 @@ def _load_samples(obj: Any) -> torch.Tensor:
     if not torch.is_floating_point(x):
         x = x.float()
 
-    # Normalize shapes a bit for image-like tensors
-    # Common cases: (N, 1, 28, 28), (N, 28, 28), (N, 784)
-    if x.dim() == 3:  # (N, H, W)
+    if x.dim() == 3: 
         x = x.unsqueeze(1)
     return x
 
@@ -67,7 +65,6 @@ def _pairwise_l2(x: torch.Tensor, max_n: int = 512, seed: int = 0) -> Tuple[floa
     idx = rng.choice(n, size=m, replace=False)
     y = x[idx].reshape(m, -1).float()
 
-    # sample pairs
     num_pairs = min(20000, m * (m - 1) // 2)
     a = rng.integers(0, m, size=num_pairs)
     b = rng.integers(0, m, size=num_pairs)
@@ -112,7 +109,6 @@ def compute_metrics(path: str, in_min: float, in_max: float, sat_thr: float, max
     finite_mask = torch.isfinite(x)
     pct_finite = finite_mask.float().mean().item() * 100.0
 
-    # for range stats, ignore non-finite
     xf = x.clone()
     xf[~finite_mask] = 0.0
 

@@ -23,7 +23,6 @@ from src.models_mnist import ScoreUNet
 from src.sampling import annealed_langevin_dynamics
 
 
-# --- DEFAULT CONFIGURATION ---
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 LR = 1e-3
 EPOCHS = 50

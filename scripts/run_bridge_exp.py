@@ -121,8 +121,8 @@ def auto_nrow(n: int) -> int:
         return 4
     if n <= 64:
         return 8
-    if n <= 256:
-        return 16
+    if n <= 256:cd ~/clement/MVA/MVA_PGM
+
     return 32
 
 
