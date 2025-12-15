@@ -13,556 +13,343 @@
 \usepackage{microtype}
 \usepackage{xcolor}
 \usepackage{tcolorbox}
+\usepackage{float}
+
+% Tighter spacing for sections
+\usepackage{titlesec}
+\titlespacing*{\section}{0pt}{1.2ex plus 0.8ex minus .2ex}{0.8ex plus .2ex}
+\titlespacing*{\subsection}{0pt}{0.9ex plus 0.6ex minus .2ex}{0.5ex plus .2ex}
+
+% Global compactness (form only)
+\setlength{\parindent}{0pt}
+\setlength{\parskip}{0.35em}
+\setlength{\textfloatsep}{10pt plus 2pt minus 2pt}
+\setlength{\floatsep}{8pt plus 2pt minus 2pt}
+\setlength{\intextsep}{8pt plus 2pt minus 2pt}
+\setlength{\abovedisplayskip}{7pt plus 2pt minus 2pt}
+\setlength{\belowdisplayskip}{7pt plus 2pt minus 2pt}
+\setlength{\abovecaptionskip}{4pt}
+\setlength{\belowcaptionskip}{0pt}
 
 \title{\textbf{From Denoising to Scores: DAEs to Noise-Conditional Score Networks}}
 \author{Ilan Aliouchouche \and Clément Marie \and Karim Rochd}
-\date{ENS Paris-Saclay --- Master MVA, 2025}
+\date{ENS Paris-Saclay - Master MVA, 2025}
 
 \begin{document}
 
 \maketitle
 
 \begin{abstract}
-% Abstract text here
+This report explores the theoretical evolution of generative modeling from Energy-Based Models to modern Score-Based methods. We analyze the connection established by Vincent (2011) between Denoising Autoencoders and Score Matching, and examine how Song \& Ermon (2019) leveraged this insight to address the manifold hypothesis using Noise-Conditional Score Networks and Annealed Langevin Dynamics.
 \end{abstract}
 
-\tableofcontents
-\newpage
+\begin{center}
+\small
+\textbf{Code:} \href{https://github.com/karimrochd/MVA_PGM/tree/main}{github.com/karimrochd/MVA\_PGM}
+\end{center}
+\vspace{0.5em}
+
+\section*{Author Contributions}
+\begin{itemize}[noitemsep,leftmargin=*]
+  \item \textbf{Ilan Aliouchouche:} Developed the theoretical background on energy-based models and score matching, detailed the Vincent (2011) DAE–DSM connection, selected and derived key equations, and drafted the \emph{Background} and \emph{Vincent (2011)} sections. Implemented a DAE trained on 1D manifolds to visualize and analyze the learned score fields.
+  \item \textbf{Karim Rochd:} Presented and analyzed the Song \& Ermon (2019) framework, including noise-conditioning and annealed Langevin dynamics. Contributed to the interpretation of experimental limitations and authored the \emph{Discussion \& Limitations} and \emph{Conclusion} sections.
+  \item \textbf{Clément Marie:} Implemented the DAE and NCSN architectures and training pipelines, developed Langevin and annealed Langevin samplers, designed and conducted the experiments (toy data and MNIST), and wrote the \emph{Experimental Results} section.
+\end{itemize}
 
 % ========================
 \section{Introduction}
-% Context, motivation, overview of the two papers, and roadmap.
 
-Generative modeling aims to learn the underlying distribution $p_{\text{data}}$ of a dataset in order to generate new, realistic samples. One powerful approach is Energy-Based Modeling (EBM), which defines the probability density as $p_\theta(x) = e^{-E_\theta(x)} / Z_\theta$. However, training EBMs via maximum likelihood is notoriously difficult because the partition function $Z_\theta$ is generally intractable[cite: 17].
+Generative modeling aims to learn the underlying probability distribution $p_{\text{data}}(x)$ of a dataset. While likelihood-based methods and implicit models (GANs) have dominated the field, Energy-Based Models (EBMs) offer a flexible alternative by modeling the density up to a normalizing constant. However, EBMs historically faced a significant bottleneck: the intractability of the partition function. To bypass this, Hyvärinen proposed \textit{Score Matching}, shifting the objective from estimating the density itself to estimating its gradient (the score) \cite{hyvarinen2005}.
 
-Score matching offers an alternative by modeling the gradient of the log-density, $\nabla_x \log p(x)$, effectively bypassing the normalizing constant $Z_\theta$[cite: 18]. While theoretically elegant, standard score matching struggles in practice with high-dimensional data and low-density regions[cite: 300].
+This report analyzes two papers that bridged heuristic feature learning and principled probabilistic modeling. First, \textbf{Vincent (2011)} \cite{vincent2011} showed that Denoising Autoencoders (DAEs) are mathematically equivalent to performing score matching on a noise-smoothed data distribution. Building on this, \textbf{Song \& Ermon (2019)} \cite{song2019} identified limitations in applying standard score matching to high-dimensional data, specifically the manifold hypothesis. They introduced \textit{Noise-Conditional Score Networks} (NCSN) combined with annealed Langevin dynamics, a framework that leverages the DAE-score connection to achieve state-of-the-art generative performance.
 
-In this report, we trace the evolution of score-based generative modeling through two foundational papers. First, we examine \cite{vincent2011}, which established a surprising equivalence between Denoising Autoencoders (DAEs) and score matching, showing that DAEs implicitly learn the score of a Gaussian-smoothed data distribution[cite: 164]. Second, we explore \cite{song2019}, which scales this insight by training a single Noise-Conditional Score Network (NCSN) across multiple noise levels. This multi-scale approach overcomes the limitations of the manifold hypothesis [cite: 446], enabling high-quality synthesis via Annealed Langevin Dynamics[cite: 308].
+\paragraph{Notation (used throughout).}
+We denote by $p_{\text{data}}(x)$ the unknown data distribution of clean samples $x$.
+A corruption process is written $q(\tilde{x}\mid x)$, where $\tilde{x}$ is a noisy version of $x$ (e.g. $\tilde{x}=x+\varepsilon$).
+The resulting \emph{marginal} noisy distribution at scale $\sigma$ is
+$q_\sigma(\tilde{x})=\int q_\sigma(\tilde{x}\mid x)\,p_{\text{data}}(x)\,dx$.
+We call $\nabla_{\tilde{x}}\log q_\sigma(\tilde{x})$ the \emph{score} of the smoothed density at noise level $\sigma$.
+
 
 
 % ========================
 \section{Background}
-% Definition of score, unnormalized models, Hyvärinen score matching, denoising idea, notation table.
 
 \subsection{Energy-Based Models and Score Matching}
 
-Energy-based models define a density
+Energy-based models define a probability density
 \[
-p_\theta(x) = \frac{\exp(-E_\theta(x))}{Z_\theta},
+p_\theta(x) = \frac{1}{Z_\theta}\exp(-E_\theta(x)),
 \]
-where the normalizing constant $Z_\theta$ is generally intractable, making
-maximum-likelihood training difficult in high dimensions. \\
-
-To avoid computing $Z_\theta$, Hyvärinen~(2005) introduced \emph{score matching},
-which trains EBMs by aligning the model score $\nabla_x \log p_\theta(x)$ with
-the data score $\nabla_x \log q(x)$. This leads to the Explicit Score Matching
-(ESM) objective
+where the normalizing constant $Z_\theta$ is generally intractable. To avoid computing $Z_\theta$, Hyvärinen (2005) introduced \textbf{score matching}, which minimizes the distance between the model score $\psi_\theta(x) = \nabla_x \log p_\theta(x)$ and the data score $\psi_{\text{data}}(x) = \nabla_x \log p_{\text{data}}(x)$. The \textit{Explicit Score Matching} (ESM) objective is:
 \[
-J_{\text{ESM}}(\theta)
-= \tfrac12\,\mathbb E_{q(x)} \!\left[
-\left\| \nabla_x \log p_\theta(x) - \nabla_x \log q(x) \right\|^2
-\right],
+J_{\text{ESM}}(\theta) = \frac{1}{2} \mathbb{E}_{p_{\text{data}}(x)} \left[ \left\| \psi_\theta(x) - \psi_{\text{data}}(x) \right\|^2 \right].
 \]
-which can be interpreted as a least-squares fit between score fields. \\
+Since $\psi_{\text{data}}(x)$ is unknown, Hyvärinen derived an equivalent \textit{Implicit Score Matching} (ISM) objective \cite{hyvarinen2005} using integration by parts, which depends only on the model's energy function and data samples.
 
-However, the data score $\nabla_x \log q(x)$ is not accessible for general
-datasets, making ESM unusable in practice. Hyvärinen showed that minimizing ESM
-is equivalent to minimizing the tractable Implicit Score Matching (ISM) loss
-\[
-J_{\text{ISM}}(\theta)
-= \mathbb E_{q(x)}\!\left[
-\operatorname{tr}\!\left(\nabla_x^2 E_\theta(x)\right)
-+ \tfrac12 \left\| \nabla_x E_\theta(x) \right\|^2
-\right].
-\]
+\subsection{Denoising Autoencoders (DAEs)}
 
-Since $ J_{\text{ISM}}$ depends only on $E_\theta(x)$ and its
-derivatives, it removes all dependence on the unknown score
-$\nabla_x \log q(x)$ while remaining fully equivalent to the original ESM
-criterion.
+Denoising Autoencoders are neural networks trained to reconstruct a clean input $x$ from a corrupted version $\tilde{x} \sim q(\tilde{x}|x)$. A common choice is additive Gaussian noise $\tilde{x} = x + \varepsilon$, with $\varepsilon \sim \mathcal{N}(0, \sigma^2 I)$. Let $f_\theta$ be an encoder and $g_\theta$ a decoder.
 
-\subsection{Denoising Autoencoders}
-
-
-Denoising autoencoders (DAEs) modify the standard autoencoder objective by
-training the model to reconstruct a clean input from a corrupted version.
-Instead of reproducing the input itself, as a vanilla autoencoder does, the DAE
-receives a perturbed sample $\tilde{x}$ generated through a corru ption process
-$q(\tilde{x}\mid x)$, typically Gaussian noise $\tilde{x} = x + \sigma \varepsilon$
-with $\varepsilon \sim \mathcal N(0,I)$ and a chosen noise level $\sigma$. \\
-
-\begin{tcolorbox}[colback=gray!5!white,colframe=black,
-  title={Denoising Autoencoder Training Objective}]
-Let $h = f_\theta(\tilde{x})$ denote the encoder output and 
-$p_\theta(x\mid h)$ the decoder distribution.  
-The denoising autoencoder is trained by minimizing
-\[
-L_{\mathrm{DAE}}(\theta)
-=
--
-\mathbb E_{q(x)}
-\,
-\mathbb E_{q(\tilde{x}\mid x)}
-\left[
-\log p_\theta\!\left(x \mid h = f_\theta(\tilde{x})\right)
-\right],
-\]
-that is, the negative log-likelihood of reconstructing the clean input $x$
-from its corrupted version $\tilde{x}$.
+\begin{tcolorbox}[colback=gray!5!white,colframe=black,left=2pt,right=2pt,top=2pt,bottom=2pt, title={DAE Training Objective}]
+The DAE minimizes the expected reconstruction error (typically squared Euclidean norm):
+\begin{equation}
+    \mathcal{L}_{\text{DAE}}(\theta) = \mathbb{E}_{x \sim p_{\text{data}}} \mathbb{E}_{\tilde{x} \sim q(\tilde{x}|x)} \left[ \left\| g_\theta(f_\theta(\tilde{x})) - x \right\|^2 \right].
+\end{equation}
 \end{tcolorbox}
 
-This objective encourages the model to learn directions that map corrupted inputs back
-toward the data manifold rather than simply copying the input. \\
-
-\begin{figure}[h!]
-\centering
-\begin{tikzpicture}[>=stealth,thick]
-
-\node[circle, draw, minimum size=0.9cm] (x) at (0,0) {$x$};
-\node[circle, draw, minimum size=0.9cm] (xt) at (2,1) {$\tilde{x}$};
-\node[circle, draw, minimum size=0.9cm] (h) at (4,0) {$h$};
-\node[circle, draw, minimum size=0.9cm] (L) at (2,-1.2) {$L$};
-
-\draw[->] (x) -- node[midway, above, xshift=-10pt] {\scriptsize corruption} (xt);
-\draw[->] (xt) -- node[midway, above, xshift=9pt] {\scriptsize encoder} (h);
-
-\draw[->] (h) -- node[midway, right, xshift=-3pt, yshift=-5pt] {\scriptsize decoder} (L);
-
-\draw[->] (x) -- (L);
-
-\end{tikzpicture}
-
-\caption{Computation graph of a DAE. The clean input $x$ is corrupted into
-$\tilde{x}$, encoded into $h$, and decoded to produce a reconstruction that is
-compared to $x$ through the loss $\mathcal L$.}
-\end{figure}
-
-
-
-
-
-
-
-
-
+Intuitively, the DAE learns a vector field pointing from the noisy observation $\tilde{x}$ back toward the data manifold. As we will see, Vincent (2011) proved that this reconstruction vector is proportional to the score of the smoothed density.
 
 % ========================
-\section{Vincent (2011): Denoising Autoencoders and Score Matching}
-% DAE objective, equivalence with score matching, main equations, small-noise limit, key insights.
+\section{Vincent (2011): Denoising Autoencoders are Score Matchers}
 
-\subsection{Denoising score matching and its connection to denoising autoencoders}
+Vincent (2011) established a link between heuristic Denoising Autoencoders (DAEs) and probabilistic score matching \cite{vincent2011}. Training a DAE to denoise samples is mathematically equivalent to estimating the score of the data distribution smoothed by the corruption noise.
 
-For simplicity, we denote the score model of our energy-based density by
-\[
-\psi(x;\theta)\;\approx\;\nabla_x \log p_\theta(x),
-\]
-so that $\psi(\cdot;\theta)$ is a vector field defined over the data space.  
-Denoising Score Matching (DSM) introduces a corrupted observation $\tilde{x}$ obtained from a clean sample $x\sim q(x)$ through a corruption process $q_\sigma(\tilde{x}\mid x)$.  
-The corresponding joint distribution factorizes as
-\[
-q(x,\tilde{x}) = q(x)\, q_\sigma(\tilde{x}\mid x).
-\]
+\subsection{Denoising Score Matching (DSM)}
 
-\begin{tcolorbox}[colback=gray!5!white,colframe=black,
-  title={Denoising Score Matching Objective}]
-The Denoising Score Matching (DSM) objective is defined as
-\[
-J_{\mathrm{DSM}}(\theta)
-=
-\mathbb E_{q(x,\tilde{x})}
-\!\left[
-\frac12
-\left\|
-\psi(\tilde{x};\theta)
--
-\nabla_{\tilde{x}} \log q(\tilde{x}\mid x)
-\right\|^2
-\right],
-\]
-that is, a mean-squared regression objective where the model predicts the
-posterior score $\nabla_{\tilde{x}}\log q(\tilde{x}\mid x)$ from the corrupted
-input $\tilde{x}$.
-\end{tcolorbox}
-
-This has exactly the structure of a mean squared error regression problem where  
-the input is $\tilde{x}$, the prediction is $\psi(\tilde{x};\theta)$, and the regression target is the posterior score $\nabla_{\tilde{x}}\log q(\tilde{x}\mid x)$.\\
-
-Consider now the Gaussian corruption process used in denoising autoencoders:
-\[
-q(\tilde{x}\mid x)
-= \mathcal N(\tilde{x}\mid x,\sigma^2 I).
-\]
-Since DSM is a least-squares objective in $\psi(\tilde{x};\theta)$, the optimal vector field is the conditional expectation
-\[
-\psi^\star(\tilde{x})
-=
-\mathbb E_{q(x\mid \tilde{x})}
-\!\left[
-\nabla_{\tilde{x}}\log q(\tilde{x}\mid x)
-\right].
-\]
-
-For Gaussian corruption, the posterior score satisfies
+Standard score matching requires the intractable data score $\nabla_x \log q(x)$ \cite{hyvarinen2005}. To bypass this, Vincent introduced \textbf{Denoising Score Matching (DSM)}, which matches the score of a conditional corruption distribution $q(\tilde{x}|x)$. Given a clean sample $x$ and a corrupted version $\tilde{x} \sim q(\tilde{x}|x)$, the DSM objective is defined as:
+\begin{equation}
+    J_{\mathrm{DSM}}(\theta) = \frac{1}{2} \mathbb{E}_{q(x, \tilde{x})} \left[ \left\| \psi(\tilde{x};\theta) - \nabla_{\tilde{x}} \log q(\tilde{x}|x) \right\|^2 \right].
+\end{equation}
+Crucially, the target $\nabla_{\tilde{x}} \log q(\tilde{x}|x)$ is analytically tractable. For Gaussian corruption $\tilde{x} = x + \varepsilon$ with $\varepsilon \sim \mathcal{N}(0,\sigma^2 I)$, the conditional density satisfies
 \[
 \nabla_{\tilde{x}} \log q(\tilde{x}\mid x)
 = \frac{x - \tilde{x}}{\sigma^2}.
 \]
-Thus,
-\[
-\psi^\star(\tilde{x})
-=
-\mathbb E_{q(x\mid\tilde{x})}
-\!\left[
-\frac{x - \tilde{x}}{\sigma^2}
-\right].
-\]
 
-This expression makes the denoising interpretation explicit: the optimal vector field $\psi^\star(\tilde{x})$ points, in expectation, from a noisy sample $\tilde{x}$ toward its clean counterpart $x$, scaled by $\sigma^{-2}$.\\
+The optimal score model $\psi^*$ minimizing $J_{\mathrm{DSM}}$ is the conditional expectation of this target \cite{vincent2011}:
+\begin{equation}
+    \psi^*(\tilde{x}) = \mathbb{E}_{q(x|\tilde{x})} \left[ \frac{x - \tilde{x}}{\sigma^2} \right] = \frac{1}{\sigma^2} \left( \underbrace{\mathbb{E}[x|\tilde{x}]}_{\text{Optimal Denoising}} - \tilde{x} \right).
+    \label{eq:optimal_score}
+\end{equation}
+Equation (\ref{eq:optimal_score}) reveals the geometric interpretation: the optimal score field corresponds to the vector pointing from the noisy point $\tilde{x}$ back towards the clean data manifold.
 
-The term $(x-\tilde{x})$ is precisely the reconstruction direction learned by denoising autoencoders, whose objective is to recover $x$ from $\tilde{x}$.\\
-
-A visual illustration is shown in Figure~\ref{fig:scores_fig}, where a one-dimensional data manifold (in red) is corrupted with Gaussian noise.  
-The Gaussian corruption kernels around manifold points are shown in green, the noisy samples in grey, and the vector field learned by a denoising autoencoder is represented in blue.  
-The resulting field points in the direction of decreasing corruption, back toward the true manifold.\\
-
-\begin{figure}[h!]
-\centering
-\includegraphics[width=0.7\textwidth]{scores.png}
-\caption{One-dimensional data manifold (red), Gaussian corruption kernels (green), noisy samples (grey), and the denoising vector field learned by a DAE (blue).}
-\label{fig:scores_fig}
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.45\textwidth]{scores.png}
+    \caption{\small Visualization of the learned vector field. Blue arrows represent the score $\psi(\tilde{x})$, pointing from noisy samples (grey) back towards the high-density data manifold (red).}
+    \label{fig:scores_fig}
 \end{figure}
 
-Vincent~(2011) proved that the DSM objective is equivalent to the ESM and the proof does not depend on the particular form of $q(\tilde{x}\mid x)$ or $q(x)$.
+\subsection{Equivalence with the DAE Objective}
 
-\subsection{An EBM Yielding the DAE Objective}
+Vincent (2011) shows that, for a particular parametrization, the denoising score matching (DSM) objective coincides with the standard DAE reconstruction objective, up to a constant factor \cite{vincent2011}.
 
-\begin{tcolorbox}[colback=gray!5!white,colframe=black,title={Connection between DSM and the DAE objective}]
-Consider the denoising autoencoder reconstruction loss
+\begin{tcolorbox}[colback=gray!5!white,colframe=black,title={Theorem: DSM $\equiv$ DAE (Vincent, 2011)}, left=2pt,right=2pt,top=2pt,bottom=2pt]
+Consider a Gaussian-corruption DAE with a single hidden layer and tied weights $W$. The hidden nonlinearity is the \emph{sigmoid} function, denoted $\mathrm{sigm}(\cdot)$, and the associated energy involves the \emph{softplus} function $\operatorname{softplus}(u)=\log(1+e^{u})$, whose derivative is $\nabla \operatorname{softplus}(u)=\mathrm{sigm}(u)$.
+Define the energy-based model
 \[
-L_{\mathrm{DAE}}(\theta)
-=
-\mathbb E_{q_\sigma(x,\tilde{x})}
-\!\left[
-\big\|
-W^\top \sigma(W\tilde{x}+b) + c - x
-\big\|^2
-\right],
+E(x;\theta) \;=\; -\frac{1}{\sigma^{2}}\left(\langle c, x\rangle - \frac{1}{2}\|x\|^{2} + \sum_{j}\operatorname{softplus}\!\big(\langle W_{j}, x\rangle + b_{j}\big)\right),
 \]
-obtained under Gaussian corruption $q(\tilde{x}\mid x)=\mathcal N(\tilde{x}\mid x,\sigma^2 I)$.\\
-
-For the energy-based model
+where $\theta=(W,b,c)$. Its score is
 \[
-p(x;\theta)=\frac{1}{Z(\theta)}\exp\!\big(-E(x;\theta)\big),
-\qquad
-E(x;\theta)
-=
--\langle c,x\rangle
--\tfrac12\|x\|^2
-+
-\sum_{j=1}^{d_h}\!
-\operatorname{softplus}(\langle W_j,x\rangle + b_j),
+\psi(x;\theta) \;=\; \nabla_x \log p_\theta(x)
+\;=\; \frac{1}{\sigma^{2}}\Big(W^{\top}\mathrm{sigm}(Wx+b) + c - x\Big).
 \]
-the associated score field satisfies
-\[
-\psi(x;\theta)
-=
-\frac{1}{\sigma^2}
-\!\left(
-W^\top \sigma(Wx+b)+c-x
-\right).
-\]
-
-Substituting this expression into the denoising score matching loss gives
-\[
-J_{\mathrm{DSM}}(\theta)
-=
-\frac{1}{2\sigma^4}\,
-L_{\mathrm{DAE}}(\theta).
-\]
-
-In other words, minimizing the DSM objective for this EBM is exactly
-equivalent to minimizing the denoising autoencoder reconstruction loss.
+Substituting this parametrization into the DSM objective with Gaussian corruption yields a proportionality with the DAE squared reconstruction loss $L_{\mathrm{DAE}}$ \cite{vincent2011}:
+\begin{equation}
+J_{\mathrm{DSM}}(\theta) \;=\; \frac{1}{2\sigma^{4}}\,L_{\mathrm{DAE}}(\theta).
+\end{equation}
 \end{tcolorbox}
 
+\textbf{Conclusion:} Minimizing the DAE reconstruction loss is equivalent, up to a constant factor, to denoising score matching on the noise-smoothed density $q_\sigma(\tilde{x})$. Consequently, the learned denoising vector field $\mathbb{E}[x\mid \tilde{x}] - \tilde{x}$ is proportional to the score, and the noise level $\sigma$ controls the smoothing scale.
 
 % ========================
 \section{Song \& Ermon (2019): Noise-Conditional Score Networks}
 
 \subsection{Motivation: the manifold and low-density problems}
 
-Although Vincent~(2011) showed that denoising autoencoders learn the score of a
-smoothed data distribution, using a single fixed noise level~$\sigma$ remains
-insufficient for high-dimensional generative modeling.
-Real-world data, such as natural images, lie near a low-dimensional manifold in
-$\mathbb{R}^d$, where the score~$\nabla_x \log p_{\text{data}}(x)$ is well defined
-but becomes unstable in low-density regions.
-When sampling with Langevin dynamics, the estimated gradients outside the data
-support are unreliable, causing poor mixing or divergence. \\
+Although Vincent (2011) showed that denoising autoencoders learn the score of a smoothed data distribution, using a single fixed noise level $\sigma$ remains insufficient for high-dimensional generative modeling. Real-world data, such as natural images, lie near a low-dimensional manifold in $\mathbb{R}^d$, where the score $\nabla_x \log p_{\text{data}}(x)$ is unstable in low-density regions. When sampling with Langevin dynamics, the estimated gradients outside the data support are unreliable, causing poor mixing \cite{song2019}.
 
-To address this, Song and Ermon~(2019) proposed to add Gaussian noise to the
-data and train the score network across multiple noise levels.
-This smoothing makes the data distribution well behaved over all of
-$\mathbb{R}^d$, allowing the model to learn stable coarse-scale gradients for
-large~$\sigma$ and progressively refine fine details as~$\sigma$ decreases.
-
+To address this, Song and Ermon (2019) proposed to train the score network across multiple noise levels, making the data distribution well behaved over all of $\mathbb{R}^d$.
 
 \subsection{Noise-conditional network formulation}
 
-The key idea is to make the score model explicitly depend on the noise level~$\sigma$
-so that one shared network can learn multiple smoothed versions of the data distribution. \\
-
-Let $\{\sigma_1 > \sigma_2 > \cdots > \sigma_L\}$ denote a geometric sequence of
-noise scales.  For each~$\sigma_i$, define the corresponding
-Gaussian-smoothed data distribution
-\[
-q_{\sigma_i}(x)
-= \int p_{\text{data}}(x')\,\mathcal N(x \mid x', \sigma_i^2 I)\,dx' .
-\]
-Each $q_{\sigma_i}$ has full support in~$\mathbb{R}^d$, making its score
-well defined everywhere.  Instead of training separate networks for each noise
-level, the authors introduced a single model
-$s_\theta(x,\sigma)$ that receives both the noisy input~$x$ and the
-noise level~$\sigma$ as arguments and is trained to approximate
+The key idea is to make the score model explicitly depend on the noise level $\sigma$. Let $\{\sigma_1 > \sigma_2 > \cdots > \sigma_L\}$ denote a geometric sequence of noise scales. The authors introduced a single model $s_\theta(x,\sigma)$ that receives both the noisy input $x$ and the noise level $\sigma$ as arguments:
 \[
 s_\theta(x,\sigma) \approx \nabla_x \log q_\sigma(x).
 \]
-Conditioning on~$\sigma$ lets the same network learn score fields at different noise levels:
-smoother ones for large~$\sigma$ and more detailed ones for small~$\sigma$.
 
-
-\begin{tcolorbox}[colback=gray!5!white,colframe=black,
-  title={Noise-Conditional Score Network (NCSN)}]
-Given a ladder of noise scales $\{\sigma_i\}_{i=1}^{L}$,
-a single neural network $s_\theta(x,\sigma)$ is trained to estimate
-the score of the Gaussian-smoothed data distribution $q_\sigma$:
-\[
-s_\theta(x,\sigma) \;\approx\; \nabla_x \log q_\sigma(x).
-\]
-\end{tcolorbox}
-
-This formulation extends Vincent's denoising autoencoder interpretation.
-In Vincent~(2011), training a DAE with Gaussian corruption of variance~$\sigma^2$
-makes its reconstruction field~$(r_\theta(x)-x)/\sigma^2$ approximate the score
-$\nabla_x \log q_\sigma(x)$ of the data distribution smoothed by Gaussian noise.
-Song and Ermon~(2019) generalize this idea by learning a single network
-$s_\theta(x,\sigma)$ that predicts these scores jointly for multiple
-noise levels~$\sigma$, thereby capturing both coarse and fine structures of the
-data manifold.
-
-
-\subsection{Training objective: denoising score matching (DSM)}
-
-Once the model structure is defined, the next step is to specify how it is trained.
-Song and Ermon use a denoising score-matching objective that teaches the network
-to recover the exact gradient of the log-density for each noise level. \\
-
-For each fixed noise level~$\sigma$, the network is trained using the
-\emph{denoising score-matching} objective
+\begin{tcolorbox}[colback=gray!5!white,colframe=black, title={Noise-Conditional Score Network (NCSN)}]
+Given a ladder of noise scales $\{\sigma_i\}_{i=1}^{L}$, a single neural network $s_\theta(x,\sigma)$ is trained to estimate the scores using a weighted objective:
 \begin{equation}
-\ell(\theta;\sigma)
-=\tfrac12\,\mathbb E_{x\sim p_{\text{data}}}
-  \mathbb E_{\tilde x\sim\mathcal N(x,\sigma^2 I)}
-  \Big[\big\|
-    s_\theta(\tilde x,\sigma)
-    +\tfrac{\tilde x-x}{\sigma^2}
-  \big\|_2^2\Big],
-\label{eq:dsm-single}
-\end{equation}
-where $\tilde x$ denotes a corrupted version of the clean data~$x$.
-The vector $(\tilde x-x)/\sigma^2$ corresponds to the exact score of the
-Gaussian corruption kernel, so the network learns to reproduce this field from
-noisy samples.
-
-Training across all noise scales amounts to minimizing the averaged loss
-\begin{equation}
-\mathcal L(\theta)
-=\frac{1}{L}\sum_{i=1}^{L}
-  \lambda(\sigma_i)\,\ell(\theta;\sigma_i),
-\qquad
-\lambda(\sigma_i)=\sigma_i^2,
+\mathcal L(\theta) =\frac{1}{L}\sum_{i=1}^{L} \lambda(\sigma_i) \cdot \ell(\theta;\sigma_i),
 \label{eq:dsm-multi}
 \end{equation}
-where the weighting $\lambda(\sigma)=\sigma^2$ balances gradient magnitudes at
-different noise levels and prevents small-$\sigma$ terms from dominating.
-This objective is simple, stable, and free of adversarial or likelihood
-components; it can be applied to any differentiable network architecture.
-
-\begin{tcolorbox}[colback=gray!5!white,colframe=black,
-  title={Key insight}]
-By training $s_\theta(x,\sigma)$ to predict the gradient of the
-log-density of Gaussian-smoothed data for multiple noise levels,
-NCSNs learn a single multi-scale score field that spans from coarse
-global structure to fine details.
+where $\ell(\theta;\sigma_i)$ is the DSM loss. The paper establishes that $\lambda(\sigma_i) = \sigma_i^2$ is the \textbf{optimal weighting} to ensure the loss terms have the same magnitude across all scales \cite{song2019}.
 \end{tcolorbox}
 
-Sampling from these learned scores is performed using the
-\emph{annealed Langevin dynamics} procedure described in Section~5.
+\subsection{Sampling with Annealed Langevin Dynamics}
 
-% ========================
-\section{Sampling with Annealed Langevin Dynamics}
+Sampling uses \emph{Annealed Langevin Dynamics}, summarized below.
 
-\subsection{Motivation}
-
-Once the network has learned score functions $s_\theta(x,\sigma)$ for multiple
-noise levels, it can be used to generate new samples.
-The goal is to draw samples from the original data distribution
-$p_{\text{data}}(x)$ using only its estimated score field.
-A natural approach is \emph{Langevin dynamics}, a stochastic process that
-iteratively perturbs a particle in the direction of increasing log-density while
-adding Gaussian noise to maintain exploration. \\
-
-Standard Langevin dynamics updates a sample~$x_t$ as
-\[
-x_{t+1} = x_t + \frac{\alpha}{2}\nabla_x \log p(x_t) + \sqrt{\alpha}\,z_t,
-\quad z_t \sim \mathcal{N}(0,I),
-\]
-where $\alpha$ is the step size.
-If the score~$\nabla_x \log p(x)$ is exact and $\alpha$ is small enough, this
-procedure asymptotically produces samples from~$p(x)$.
-However, when applied directly to high-dimensional data, the dynamics tend to
-mix very slowly and may get trapped within a single mode.
-Song and Ermon~(2019) propose an \emph{annealed} version that leverages the
-multi-scale scores learned by the Noise-Conditional Score Network.
-
-\subsection{Annealed Langevin dynamics algorithm}
-
-The central idea is to sample gradually from high noise to low noise.
-At large~$\sigma$, the smoothed distribution~$q_\sigma(x)$ is simple and
-well connected; as $\sigma$ decreases, the process refines the sample toward
-the true data manifold.
-For each noise level~$\sigma_i$, the network~$s_\theta(x,\sigma_i)$ provides
-an estimate of the score~$\nabla_x \log q_{\sigma_i}(x)$, and Langevin steps
-are taken accordingly.
-
-\begin{tcolorbox}[colback=gray!5!white,colframe=black,
-  title={Algorithm~1: Annealed Langevin Dynamics \cite{song2019generative}}]
+\begin{tcolorbox}[colback=gray!5!white,colframe=black, title={Algorithm: Annealed Langevin Dynamics}]
 \begin{enumerate}[leftmargin=*,noitemsep]
-  \item \textbf{Input:} trained score network $s_\theta(x,\sigma)$,
-        noise levels $\sigma_1 > \cdots > \sigma_L$,
-        number of iterations $T$ per level, step constant~$\epsilon$.
   \item Initialize $x_0 \sim \mathcal{N}(0, \sigma_1^2 I)$.
   \item \textbf{for} $i = 1, \dots, L$ \textbf{do}
-  \begin{enumerate}
-    \item Set $\alpha_i = \epsilon \, (\sigma_i / \sigma_L)^2$.
-    \item \textbf{for} $t = 1, \dots, T$ \textbf{do}
-    \begin{enumerate}
-      \item Sample $z_t \sim \mathcal{N}(0,I)$.
-      \item Update
-      \[
-      x \leftarrow x + \frac{\alpha_i}{2} \, s_\theta(x,\sigma_i)
-                      + \sqrt{\alpha_i} \, z_t.
-      \]
-    \end{enumerate}
+  \item \quad Set step size $\alpha_i = \epsilon \cdot (\sigma_i / \sigma_L)^2$.
+  \item \quad \textbf{for} $t = 1, \dots, T$ \textbf{do}
+  \item \quad \quad $x_{t+1} \leftarrow x_t + \frac{\alpha_i}{2} s_\theta(x_t,\sigma_i) + \sqrt{\alpha_i} z_t$, with $z_t \sim \mathcal{N}(0,I)$.
   \end{enumerate}
-  \item \textbf{Output:} final sample $x$.
-\end{enumerate}
 \end{tcolorbox}
-
-Here the step size~$\alpha_i$ scales proportionally to~$\sigma_i^2$ to maintain
-a roughly constant signal-to-noise ratio across levels.
-Each stage uses the score field at its own noise level, producing a gradual
-denoising trajectory from random Gaussian noise to the data manifold.
-The total number of iterations~$L\times T$ is a trade-off between sample
-quality and computational cost.
-
-\begin{tcolorbox}[colback=gray!5!white,colframe=black,
-  title={Key insight}]
-Annealed Langevin dynamics generate samples by successively refining
-Gaussian noise using the learned multi-scale score fields.
-High-noise levels ensure global coverage, while low-noise levels
-restore fine structure consistent with the data distribution.
-\end{tcolorbox}
-
-\subsection{Practical considerations}
-
-Empirically, Song and Ermon~(2019) report that many short updates per noise
-level yield better results than a few large steps.
-Choosing an adequate noise schedule is crucial: $\sigma_1$ must be large
-enough to cover the data manifold, and $\sigma_L$ must be small but nonzero to
-avoid numerical instability.
-They also monitor the norm of $\sigma\,s_\theta(x,\sigma)$ as a diagnostic, which
-should remain roughly constant across noise scales if the model is properly
-trained.\\
-
-The resulting samples on datasets such as CIFAR-10 and MNIST demonstrate that
-score-based generative models can produce realistic images without adversarial
-training or explicit likelihood estimation, confirming the effectiveness of
-the annealed Langevin framework.
-
-
-% ========================
-
-\section{A Unifying View: From DAEs to NCSNs}
-
-The transition from Vincent's Denoising Autoencoders to Song and Ermon's Noise-Conditional Score Networks represents a shift from representation learning to full generative modeling.
-
-\subsection{The Bridge}
-Vincent (2011) proved that minimizing the reconstruction error of a DAE with noise level $\sigma$ is mathematically equivalent to performing score matching on the smoothed density $q_\sigma(x) = \int p_{\text{data}}(y) \mathcal{N}(x|y, \sigma^2 I) dy$[cite: 156, 164]. Effectively, the "denoising vector" learned by the autoencoder points towards the mode of the data distribution[cite: 129].
-
-However, a single DAE trained with a fixed, small $\sigma$ fails as a generative model. As noted by Song and Ermon (2019), real-world data resides on low-dimensional manifolds[cite: 363]. Ideally, we want $\sigma \to 0$, but in this limit, the score is undefined in the ambient space, and the training signal vanishes in low-density regions[cite: 300, 301]. Conversely, a large $\sigma$ makes score estimation stable but destroys fine data details.
-
-\subsection{The Multi-Scale Solution}
-The key innovation of the NCSN framework is to accept this trade-off and utilize \textit{all} noise levels. Instead of training separate DAEs, Song and Ermon train a single network $s_\theta(x, \sigma)$ conditioned on the noise level[cite: 459].
-\begin{itemize}
-    \item \textbf{At high $\sigma$:} The noise "fills" the low-density regions, allowing the network to learn global structure and mix between distant modes[cite: 447].
-    \item \textbf{At low $\sigma$:} The network refines the samples, recovering the sharp details of the data manifold[cite: 508].
-\end{itemize}
-This transforms the DAE from a feature extractor into a multi-scale gradient estimator capable of guiding a sampling process from pure noise to realistic data.
-
 
 % ========================
 \section{Experimental Results and Observations}
 
-We evaluate the efficacy of Noise-Conditional Score Networks (NCSN) combined with Annealed Langevin Dynamics. The experiments focus on two main aspects: the ability to generate high-fidelity samples on complex image datasets and the ability to mix between separated modes in a distribution.
+To validate the theoretical connections, we conducted experiments on both 2D toy data and the MNIST dataset.
 
-\subsection{Image Generation Performance}
-[cite_start]The model was trained on MNIST, CelebA, and CIFAR-10 datasets[cite: 40]. [cite_start]The generated samples demonstrate that score-based models can produce high-quality images comparable to modern likelihood-based models and GANs without requiring adversarial training[cite: 11, 41].
+\subsection{Implementation Details (Reproducibility)}
 
-Quantitative evaluation on CIFAR-10 highlights the effectiveness of the method:
-\begin{itemize}
-    [cite_start]\item \textbf{Inception Score:} The NCSN achieves a score of \textbf{8.87}, setting a new state-of-the-art for unconditional generative models at the time of publication[cite: 11, 42].
-    [cite_start]\item \textbf{FID Score:} The model achieves a Fréchet Inception Distance of \textbf{25.32}, which is competitive with leading GAN architectures like SNGAN[cite: 42, 276].
-\end{itemize}
-
-\subsection{Mode Mixing (The Toy Experiment)}
-A crucial observation from \cite{song2019} is the failure of standard Langevin dynamics to mix properly when modes are separated by low-density regions.
-\begin{itemize}
-    [cite_start]\item \textbf{Standard Langevin:} When applied to a mixture of two Gaussians with disjoint supports, standard sampling fails to recover the correct relative weights of the modes, often becoming trapped in a single mode[cite: 124, 133].
-    \item \textbf{Annealed Langevin:} By starting with large noise ($\sigma_1$), the sampler bridges the low-density gap. [cite_start]As the noise level is annealed down to $\sigma_L$, the method faithfully recovers the relative weights of the mixture distribution[cite: 171, 243].
-\end{itemize}
-
-\subsection{Representation Learning}
-Beyond generation, the score network learns semantic representations of the data. [cite_start]This is evidenced by image inpainting experiments, where the model successfully reconstructs occluded parts of an image using the learned gradient fields, demonstrating it has captured the underlying structure of the data rather than simply memorizing training examples[cite: 12, 278].
-% ========================
-\section{Practical Notes & Limitations}
-
-\subsection{Hyperparameters and Stability}
-Implementing NCSNs requires careful tuning of the noise "ladder" $\{\sigma_i\}_{i=1}^L$:
-\begin{itemize}
-    \item \textbf{Geometric Sequence:} The noise levels are chosen as a geometric progression where $\frac{\sigma_1}{\sigma_2} = \dots = \frac{\sigma_{L-1}}{\sigma_L} > 1$[cite: 457]. $\sigma_1$ must be large enough to cover the data variance, while $\sigma_L$ should be small enough to be invisible to the human eye[cite: 458].
-    \item \textbf{Step Size ($\alpha$):} For the annealed Langevin dynamics, the step size $\alpha_i$ must scale with the noise variance. Song and Ermon propose $\alpha_i \propto \sigma_i^2$ to maintain a constant signal-to-noise ratio throughout the sampling process[cite: 509].
-\end{itemize}
-
-\subsection{Limitations}
-While avoiding adversarial training is a major advantage, the framework has limitations:
-\begin{itemize}
-    \item \textbf{Computational Cost:} The sampling process is iterative (e.g., $T=100$ steps per noise level [cite: 522]), which is significantly slower than single-pass generators like GANs.
-    \item \textbf{Bias:} As noted by Vincent (2011), the score estimator is biased when $\sigma > 0$. While beneficial for stability, it means we are theoretically sampling from a slightly smoothed distribution rather than the exact $p_{\text{data}}$[cite: 187].
-\end{itemize}
+\begin{table}[H]
+\centering
+\small
+\setlength{\tabcolsep}{6pt}
+\renewcommand{\arraystretch}{1.15}
+\begin{tabular}{@{}p{0.26\textwidth} p{0.68\textwidth}@{}}
+\toprule
+\textbf{Component} & \textbf{Setting} \\
+\midrule
+Data & MNIST, normalized to $[-1,1]$. No augmentation. \\
+Optimizer & Adam, learning rate $10^{-3}$, batch size 64, 50 epochs. \\
+Architecture & ScoreUNet; conditioning by concatenating a $\sigma$-map channel; output scaling by $1/\sigma$. \\
+Noise schedule (Ablation) & Geometric ladder from $\sigma_1=10$ to $\sigma_L=0.01$, with $L\in\{1,10,50\}$. \\
+Noise schedule (Bridge) & Geometric ladder from $\sigma_1=5$ to $\sigma_L=0.01$, with $L=10$. \\
+Training objective & Denoising Score Matching (DSM) with weighting $\lambda(\sigma)=\sigma^2$. \\
+Sampling (Annealed Langevin) & Step size $\alpha_i=\epsilon(\sigma_i/\sigma_L)^2$ with $\epsilon=2\cdot 10^{-5}$; $T=200$ for $L>1$, and $T=1000$ for $L=1$. \\
+Baseline (Vincent DAE) & DAE trained with reconstruction MSE at $\sigma=0.1$; sampling with standard Langevin (1000 steps, step size $10^{-4}$). \\
+\bottomrule
+\end{tabular}
+\caption{\textbf{Implementation details for reproducibility.} Summary of training, noise schedules, and sampling hyperparameters used in our experiments.}
+\label{tab:impl_details}
+\end{table}
 
 % ========================
+% TOY: MERGED FIGURE (VECTOR FIELD + MIXING)
+% ========================
+\subsection{Toy Experiment: Vector Field and Mixing}
+
+We trained a DAE on a 2D Mixture of Gaussians (8 modes) and compare sampling with standard and annealed Langevin dynamics (Figure~\ref{fig:toy_merged}).
+
+\begin{figure}[H]
+\centering
+\begin{subfigure}[t]{0.4\textwidth}
+  \centering
+  \includegraphics[width=\textwidth]{exp1_vector_field.png}
+  \caption{\textbf{Learned vector field.} DAE denoising directions align with the score field.}
+  \label{fig:toy_vector_field}
+\end{subfigure}\hfill
+\begin{subfigure}[t]{0.55\textwidth}
+  \centering
+  \includegraphics[width=\textwidth]{exp1_mixing_comparison.png}
+  \caption{\textbf{Mixing comparison.} Annealed Langevin improves mode coverage vs standard Langevin.}
+  \label{fig:toy_mixing}
+\end{subfigure}
+\caption{\textbf{Toy diagnostics (Mixture of Gaussians).} Left: DAE-learned denoising vectors approximate the score. Right: annealing mitigates poor mixing by traversing modes at high noise before refinement.}
+\label{fig:toy_merged}
+\end{figure}
+
+% ========================
+% MNIST: MERGED FIGURE (ABLATION + BRIDGE)
+% ========================
+\subsection{MNIST Experiments: Ablation and Bridge}
+
+We scaled the approach to MNIST, studied the effect of the number of noise levels $L$, and report a bridge comparison between the Vincent-style DAE baseline and a multi-scale NCSN (Figure~\ref{fig:mnist_merged}).
+
+\begin{figure}[H]
+\centering
+\begin{subfigure}[t]{0.7\textwidth}
+  \centering
+  \includegraphics[width=\textwidth]{exp3_ablation_study_improved.png}
+  \caption{\textbf{Ablation on $L$.} Best trade-off at $L=10$ under fixed sampling hyperparameters.}
+  \label{fig:mnist_ablation}
+\end{subfigure}\hfill
+\begin{subfigure}[t]{0.7\textwidth}
+  \centering
+  \includegraphics[width=\textwidth]{bridge_experiment_mnist.png}
+  \caption{\textbf{Bridge experiment.} DAE + Langevin (left) vs NCSN + annealed Langevin (right).}
+  \label{fig:mnist_bridge}
+\end{subfigure}
+\caption{\textbf{MNIST results (qualitative, $N=16$).}
+Left: ablation over the number of noise levels $L$.
+Right: bridge comparison between a single-noise Vincent DAE baseline and a multi-noise NCSN sampled with annealed Langevin.}
+
+\label{fig:mnist_merged}
+\end{figure}
+
+\section{Discussion and Limitations}
+
+\subsection{Quantitative Analysis: Smoothness versus Diversity}
+
+We quantify the trade-off between \textbf{sample smoothness} and \textbf{sample diversity}.
+Smoothness is measured by total variation (TV), while diversity is measured by the mean pairwise $\ell_2$ distance.
+All metrics are computed on $N=256$ generated samples.
+
+\paragraph{Metrics.}
+We use \textbf{TV} to capture high-frequency artifacts, \textbf{pairwise $\ell_2$} as a diversity proxy, and
+\textbf{saturation} as the fraction of near-clipped pixels
+$\mathrm{Sat}(x)=\frac{1}{HW}\sum_{i,j}\mathbf{1}\{|x_{i,j}|\ge 0.95\}$ (averaged over samples).
+
+\begin{table}[H]
+    \centering
+    \small
+    \renewcommand{\arraystretch}{1.2}
+    \begin{tabular}{@{}lccc@{}}
+    \toprule
+    \textbf{Method} & \textbf{TV} $\downarrow$ & \textbf{L2} $\uparrow$ & \textbf{Saturation} \\
+    \midrule
+    DAE (Vincent) & 1.515 & \textbf{27.73} & Low ($\sim 20\%$) \\
+    NCSN ($L=1$) & 1.491 & 27.05 & Low ($\sim 16\%$) \\
+    NCSN ($L=10$) & 0.251 & 21.41 & High ($\sim 69\%$) \\
+    NCSN ($L=50$) & \textbf{0.160} & 15.46 & Very High ($\sim 77\%$) \\
+    \bottomrule
+    \end{tabular}
+    \caption{\textbf{Smoothness--diversity trade-off.}
+    Increasing $L$ reduces TV but also decreases diversity, revealing a trade-off between visual smoothness and mode coverage.}
+    \label{tab:tradeoff}
+\end{table}
+
+\textbf{Observation.}
+Single-noise models yield high diversity but strong high-frequency noise.
+Multi-scale sampling reduces noise, while excessive annealing ($L=50$) lowers diversity and increases saturation.
+
+\textbf{Conclusion.}
+A moderate number of noise levels ($L=10$) provides the best compromise under fixed sampling hyperparameters.
+
+\subsection{The Manifold Barrier}
+
+Single-noise models fail when initialized far from the data manifold, where score estimates are unreliable.
+This leads to unstable Langevin trajectories.
+
+Noise-conditional models mitigate this by starting from large noise, where the density is smooth, and progressively refining samples toward the manifold.
+Our results confirm this multi-scale strategy is essential in high dimensions.
+
+\subsection{Computational Cost and Hyperparameter Sensitivity}
+
+Score-based sampling requires $L\times T$ sequential score evaluations, making inference significantly slower than single-pass generators such as GANs or VAEs.
+
+Moreover, annealed Langevin dynamics is sensitive to hyperparameters.
+Increasing $L$ without retuning the step size $\epsilon$ can cause instability, emphasizing the practical cost of multi-scale score models.
+
+
+
 \section{Conclusion}
 
-We have presented a coherent narrative linking Denoising Autoencoders to modern score-based generative models. Vincent (2011) laid the theoretical groundwork by identifying the connection between denoising objectives and score matching[cite: 164]. Song and Ermon (2019) resolved the geometric instabilities of the single-noise approach by introducing noise-conditional networks and annealed sampling[cite: 281]. This lineage demonstrates that learning to "undo" noise at multiple scales is equivalent to learning the gradient of the data distribution, providing a stable and principled foundation for generative modeling without adversarial objectives.
-% ========================
-\bibliographystyle{plain} % or 'alpha', 'unsrt', etc.
-\bibliography{references} % This tells LaTeX to look for references.bib
-% ========================
-\appendix
-\section{Derivation Snippets}
-% Optional small derivations from Vincent (2011).
+The evolution from the Denoising Autoencoder (DAE) to the Noise-Conditional Score Network (NCSN) provides a mathematically rigorous foundation for score-based generative modeling. \textbf{Vincent (2011)} established the critical theoretical equivalence: training a DAE with reconstruction loss is equivalent to performing score estimation on the smoothed data density. This validation separated score-based methods from traditional likelihood or adversarial approaches.
 
-\section{Glossary of Notation}
-% List of key symbols and definitions.
+\textbf{Song \& Ermon (2019)} built upon this by solving the practical challenges of high-dimensional data, primarily the manifold hypothesis and poor mixing under single-noise sampling, through the use of noise-conditioning and annealed Langevin dynamics. Ultimately, these works demonstrated that modeling the \textbf{gradient} (or direction) of the data distribution offers a highly effective and principled path to generate complex, high-fidelity samples. This confirms score estimation as a distinct and competitive third paradigm in modern generative AI.
+
+% ========================
+\begin{thebibliography}{9}
+
+\bibitem{hyvarinen2005}
+A. Hyvärinen, ``Estimation of non-normalized statistical models by score matching,'' \textit{Journal of Machine Learning Research}, vol. 6, pp. 695–709, 2005.
+
+\bibitem{vincent2011}
+P. Vincent, ``A Connection Between Score Matching and Denoising Autoencoders,'' \textit{Neural Computation}, vol. 23, no. 7, pp. 1661–1674, 2011.
+
+\bibitem{song2019}
+Y. Song and S. Ermon, ``Generative Modeling by Estimating Gradients of the Data Distribution,'' in \textit{Advances in Neural Information Processing Systems (NeurIPS)}, 2019.
+
+\end{thebibliography}
 
 \end{document}
