@@ -1,2 +1,67 @@
-experiments/data/
+############################
+# Data / outputs (heavy)
+############################
 data/
+results/
+
+# Model checkpoints / arrays
+*.pt
+*.pth
+*.ckpt
+*.npy
+*.npz
+
+# Compressed datasets
+*.gz
+*.zip
+*.tar
+*.tar.gz
+
+############################
+# Python
+############################
+__pycache__/
+*.py[cod]
+*.so
+*.egg-info/
+dist/
+build/
+.ipynb_checkpoints/
+
+# Envs
+.venv/
+venv/
+.env
+
+############################
+# Logs / runs
+############################
+*.log
+wandb/
+tensorboard/
+runs/
+
+############################
+# LaTeX (build artifacts)
+############################
+*.aux
+*.bbl
+*.blg
+*.fdb_latexmk
+*.fls
+*.log
+*.out
+*.synctex.gz
+*.toc
+*.nav
+*.snm
+
+############################
+# OS / editor
+############################
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+.vscode/
+.idea/
